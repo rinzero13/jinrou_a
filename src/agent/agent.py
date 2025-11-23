@@ -304,12 +304,18 @@ class Agent:
 
 # src/agent/agent.py (Agentクラス内)
 
+# src/agent/agent.py (Agentクラス内)
+
     def _create_talk_prompt(self) -> tuple[str, str]:
         """LLMへのシステムメッセージとユーザープロンプトを生成する."""
-        
+
+        if not self.info:
+            # TALKリクエスト時に通常は発生しないが、安全のためにチェック
+            return "system_message", f"ゲーム情報がありません。ランダムな発言をします。エージェント名: {self.agent_name}" 
+
         # --- 1. プレイヤー名（人名）の安全な取得とマップの準備 ---
         # self.info.agent_name_map が存在しない場合に備えて空の辞書をフォールバックとして設定
-        agent_name_map = getattr(self.info, 'agent_name_map', {}) if self.info else {}
+        agent_name_map = getattr(self.info, 'agent_name_map', {})
         
         # 自分のAgent IDに対応する人名を取得。存在しない場合はAgent IDをそのまま使用。
         agent_display_name = agent_name_map.get(self.agent_name, self.agent_name)
@@ -322,7 +328,7 @@ class Agent:
             f"発言は**100文字以内**の簡潔な日本語で、あなたの役職が疑われないように行ってください。\n"
         )
         
-        # 役職ごとの具体的な戦略的指示 (前回からの継続)
+        # 役職ごとの具体的な戦略的指示 (資料 の知見を組み込み)
         match self.role:
             case Role.WEREWOLF:
                 # 人狼の戦略：欺瞞と混乱の煽動
@@ -331,18 +337,26 @@ class Agent:
                 # 狂人の戦略：人狼の勝利を最優先し、村人陣営の議論を妨害
                 system_message += "あなたは狂人です。人狼の勝利のために、村人陣営の議論を混乱させ、誤ったプレイヤー（村人陣営）に投票が集まるよう誘導してください。人狼の味方となる発言や、人狼を白く見せるような発言を心がけなさい。\n"
             case Role.SEER:
-                # 占い師の戦略：真実の開示と信頼の獲得
-                system_message += "あなたは占い師です。得られた情報（占い結果や議論）を基に、信頼性を高めつつ、村人陣営を勝利に導くために最も合理的なプレイヤーを指摘してください。無意味な発言や曖昧な発言は避け、議論をリードしなさい。\n"
+                # 占い師の場合、占い結果があればそれを強調
+                divine_result = self.info.divine_result
+                if divine_result:
+                    target_name = agent_name_map.get(divine_result.target, divine_result.target)
+                    # Note: divine_result.result はSpecies型または文字列なので、Role.WEREWOLFと比較
+                    result_text = "人狼（黒）" if divine_result.result == Role.WEREWOLF else "人間（白）"
+                    system_message += f"あなたは占い師です。Agent【{target_name}】を占った結果、【{result_text}】でした。この確定情報を基に、信頼性を高めつつ、村人陣営を勝利に導くために最も合理的なプレイヤーを指摘してください。無意味な発言や曖昧な発言は避け、議論をリードしなさい。\n"
+                else:
+                    system_message += "あなたは占い師です。得られた情報（議論）を基に、信頼性を高めつつ、村人陣営を勝利に導くために最も合理的なプレイヤーを指摘してください。議論をリードしなさい。\n"
             case _: # VILLAGER, BODYGUARD, MEDIUM, etc.
                 # 村人陣営の戦略：論理的な推理と協調
                 system_message += "あなたは村人陣営です。生存者の発言を注意深く分析し、論理的推論に基づき怪しいプレイヤーを指摘するか、他のプレイヤーと協力し、村人陣営の勝利を目指してください。\n"
 
         # 確定情報のサマリーを人名（またはID）で表示
-        executed_agent_id = self.info.executed_agent if self.info and self.info.executed_agent else None
-        attacked_agent_id = self.info.attacked_agent if self.info and self.info.attacked_agent else None
+        executed_id = self.info.executed_agent
+        attacked_id = self.info.attacked_agent
         
-        executed = f"前回追放: {agent_name_map.get(executed_agent_id, executed_agent_id)}" if executed_agent_id else "なし"
-        attacked = f"前回襲撃: {agent_name_map.get(attacked_agent_id, attacked_agent_id)}" if attacked_agent_id else "なし"
+        # IDを人名に変換 (get()を使用して安全にアクセス)
+        executed_name = agent_name_map.get(executed_id, executed_id) if executed_id else "なし"
+        attacked_name = agent_name_map.get(attacked_id, attacked_id) if attacked_id else "なし"
 
         # 生存エージェントのリストを人名（またはID）で作成
         alive_agents_list = [
@@ -352,13 +366,13 @@ class Agent:
 
         # 会話履歴の取得（直近の5件に限定し、発言者も人名に変換）
         talk_history_summary = "\n".join(
-            [f"【{agent_name_map.get(t.agent, t.agent)}】: {t.text[:40]}..." for t in self.talk_history[-5:]] 
+            [f"【{agent_name_map.get(t.agent, t.agent)}】(Day{t.day}): {t.text[:40]}..." for t in self.talk_history[-5:]] 
         )
         
         user_prompt = (
             f"【現在のゲーム情報】\n"
-            f"日目: {self.info.day if self.info else 1}, 生存者: {', '.join(alive_agents_list)}\n"
-            f"確定情報: {executed} / {attacked}\n"
+            f"日目: {self.info.day}, 生存者: {', '.join(alive_agents_list)}\n"
+            f"確定情報: 前回追放: {executed_name} / 前回襲撃: {attacked_name}\n"
             f"【あなたの目標】\n"
             f"あなたの役職【{self.role.name}】の勝利に貢献する発言をしてください。特に、誰の言動が矛盾しているか、誰が信頼できるかを具体的に言及してください。\n"
             f"【直近の会話履歴（参考）】\n"
