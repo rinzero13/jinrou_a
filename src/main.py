@@ -12,6 +12,8 @@ import yaml
 
 from starter import connect
 
+from dotenv import load_dotenv
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 console_handler = logging.StreamHandler()
@@ -47,6 +49,8 @@ def execute(config_path: Path) -> None:
 
 
 if __name__ == "__main__":
+    load_dotenv()
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-c",

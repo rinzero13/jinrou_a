@@ -14,6 +14,11 @@ from aiwolf_nlp_common.packet import Info, Packet, Request, Role, Setting, Statu
 from utils.agent_logger import AgentLogger
 from utils.stoppable_thread import StoppableThread
 
+import os
+from openai import OpenAI, APIError
+
+LLM_MODEL = "gpt-3.5-turbo"
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -53,6 +58,19 @@ class Agent:
         self.talk_history: list[Talk] = []
         self.whisper_history: list[Talk] = []
         self.role = role
+
+        # --- OpenAIクライアントの初期化 ---
+        self.openai_client: OpenAI | None = None
+        if os.getenv("OPENAI_API_KEY"):
+            try:
+                self.openai_client = OpenAI()
+            except Exception as e:
+                # 環境変数が設定されていても初期化に失敗した場合
+                self.agent_logger.logger.error("Failed to initialize OpenAI client: %s", e)
+        else:
+            # 環境変数が設定されていない場合、ログで警告
+            self.agent_logger.logger.warning("OPENAI_API_KEY environment variable is not set. Using random talk mode.")
+        # ---------------------------------------------
 
         self.comments: list[str] = []
         with Path.open(
@@ -185,6 +203,13 @@ class Agent:
         Returns:
             str: Talk message / 発言メッセージ
         """
+        # --- OpenAI APIを呼び出すロジック ---
+        if self.openai_client and self.info: # self.info (ゲーム情報) がセットされているか確認
+            llm_response = self._call_openai_api()
+            if llm_response:
+                return llm_response
+                
+        # API呼び出しに失敗した場合やクライアントがない場合は、従来のランダム発言をフォールバックとして使用
         return random.choice(self.comments)  # noqa: S311
 
     def daily_finish(self) -> None:
@@ -274,3 +299,100 @@ class Agent:
             case _:
                 pass
         return None
+
+# src/agent/agent.py (Agentクラス内)
+
+# src/agent/agent.py (Agentクラス内)
+
+    def _create_talk_prompt(self) -> tuple[str, str]:
+        """LLMへのシステムメッセージとユーザープロンプトを生成する."""
+        
+        # --- 1. プレイヤー名（人名）の安全な取得とマップの準備 ---
+        # self.info.agent_name_map が存在しない場合に備えて空の辞書をフォールバックとして設定
+        agent_name_map = getattr(self.info, 'agent_name_map', {}) if self.info else {}
+        
+        # 自分のAgent IDに対応する人名を取得。存在しない場合はAgent IDをそのまま使用。
+        agent_display_name = agent_name_map.get(self.agent_name, self.agent_name)
+        # --------------------------------------------
+
+        # 役職に基づいたシステムメッセージの構築
+        system_message = (
+            f"あなたはAIWolf人狼ゲームのエージェント【{agent_display_name}】（ID：{self.agent_name}）です。あなたの役職は【{self.role.name}】です。\n"
+            f"目的は役職の勝利条件を達成することです。\n"
+            f"発言は**100文字以内**の簡潔な日本語で、あなたの役職が疑われないように行ってください。\n"
+        )
+        
+        # 役職ごとの具体的な戦略的指示 (前回からの継続)
+        match self.role:
+            case Role.WEREWOLF:
+                # 人狼の戦略：欺瞞と混乱の煽動
+                system_message += "あなたは人狼です。正体を隠し、村人陣営の疑いをそらすことが最重要です。他のプレイヤーへの協力を装いつつ、村人同士の対立を煽り、議論を有利な方向へ誘導してください。特定のプレイヤーの発言の矛盾や信頼性を具体的に指摘しなさい。\n"
+            case Role.POSSESSED:
+                # 狂人の戦略：人狼の勝利を最優先し、村人陣営の議論を妨害
+                system_message += "あなたは狂人です。人狼の勝利のために、村人陣営の議論を混乱させ、誤ったプレイヤー（村人陣営）に投票が集まるよう誘導してください。人狼の味方となる発言や、人狼を白く見せるような発言を心がけなさい。\n"
+            case Role.SEER:
+                # 占い師の戦略：真実の開示と信頼の獲得
+                system_message += "あなたは占い師です。得られた情報（占い結果や議論）を基に、信頼性を高めつつ、村人陣営を勝利に導くために最も合理的なプレイヤーを指摘してください。無意味な発言や曖昧な発言は避け、議論をリードしなさい。\n"
+            case _: # VILLAGER, BODYGUARD, MEDIUM, etc.
+                # 村人陣営の戦略：論理的な推理と協調
+                system_message += "あなたは村人陣営です。生存者の発言を注意深く分析し、論理的推論に基づき怪しいプレイヤーを指摘するか、他のプレイヤーと協力し、村人陣営の勝利を目指してください。\n"
+
+        # 確定情報のサマリーを人名（またはID）で表示
+        executed_agent_id = self.info.executed_agent if self.info and self.info.executed_agent else None
+        attacked_agent_id = self.info.attacked_agent if self.info and self.info.attacked_agent else None
+        
+        executed = f"前回追放: {agent_name_map.get(executed_agent_id, executed_agent_id)}" if executed_agent_id else "なし"
+        attacked = f"前回襲撃: {agent_name_map.get(attacked_agent_id, attacked_agent_id)}" if attacked_agent_id else "なし"
+
+        # 生存エージェントのリストを人名（またはID）で作成
+        alive_agents_list = [
+            agent_name_map.get(agent_id, agent_id)
+            for agent_id in self.get_alive_agents()
+        ]
+
+        # 会話履歴の取得（直近の5件に限定し、発言者も人名に変換）
+        talk_history_summary = "\n".join(
+            [f"【{agent_name_map.get(t.agent, t.agent)}】: {t.text[:40]}..." for t in self.talk_history[-5:]] 
+        )
+        
+        user_prompt = (
+            f"【現在のゲーム情報】\n"
+            f"日目: {self.info.day if self.info else 1}, 生存者: {', '.join(alive_agents_list)}\n"
+            f"確定情報: {executed} / {attacked}\n"
+            f"【あなたの目標】\n"
+            f"あなたの役職【{self.role.name}】の勝利に貢献する発言をしてください。特に、誰の言動が矛盾しているか、誰が信頼できるかを具体的に言及してください。\n"
+            f"【直近の会話履歴（参考）】\n"
+            f"{talk_history_summary if talk_history_summary else 'まだ会話はありません。'}\n\n"
+            f"発言:"
+        )
+        
+        return system_message, user_prompt
+
+    def _call_openai_api(self) -> str | None:
+        """OpenAI APIを呼び出して応答を取得する."""
+        if not self.openai_client:
+            return None
+
+        try:
+            system_message, user_prompt = self._create_talk_prompt()
+            
+            response = self.openai_client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=200, 
+                temperature=0.7, # 創造性の調整（0.0で確定的、1.0で多様）
+            )
+            
+            talk_content = response.choices[0].message.content.strip()
+            self.agent_logger.logger.info("LLM Response: %s", talk_content)
+            return talk_content
+            
+        except APIError as e:
+            self.agent_logger.logger.error("OpenAI API Error: %s", e)
+            return None
+        except Exception as e:
+            self.agent_logger.logger.error("An unexpected error occurred during API call: %s", e)
+            return None
