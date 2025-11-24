@@ -302,10 +302,6 @@ class Agent:
 
 # src/agent/agent.py (Agentクラス内)
 
-# src/agent/agent.py (Agentクラス内)
-
-# src/agent/agent.py (Agentクラス内)
-
     def _create_talk_prompt(self) -> tuple[str, str]:
         """LLMへのシステムメッセージとユーザープロンプトを生成する."""
 
@@ -328,7 +324,14 @@ class Agent:
             f"発言は**100文字以内**の簡潔な日本語で、あなたの役職が疑われないように行ってください。\n"
         )
         
-        # 役職ごとの具体的な戦略的指示 (資料 の知見を組み込み)
+        system_message += (
+                "あなたの発言は、単なる意見表明ではなく、「主張の核」と「他プレイヤーへの応答」を両立した議論として機能しなければなりません。\n"
+                "【議論の最優先目標】: 他者の発言を無視せず、必ず直近の論点に言及しつつ、**自分の最優先の主張の核**を論理的に展開してください。\n"
+                "【発言の品質】: 一方的な発言は避け、具体的なプレイヤーの言動を根拠として挙げてください。\n"
+                "**最終的な出力は、思考プロセスと発言内容を明確に区別し、必ず【発言：】というラベルを付けてください。**"
+        )
+        
+        # 役職ごとの具体的な戦略的指示
         match self.role:
             case Role.WEREWOLF:
                 # 人狼の戦略：欺瞞と混乱の煽動
@@ -377,32 +380,71 @@ class Agent:
             f"あなたの役職【{self.role.name}】の勝利に貢献する発言をしてください。特に、誰の言動が矛盾しているか、誰が信頼できるかを具体的に言及してください。\n"
             f"【直近の会話履歴（参考）】\n"
             f"{talk_history_summary if talk_history_summary else 'まだ会話はありません。'}\n\n"
-            f"発言:"
+        )
+
+        user_prompt += (
+            f"\n\n【議論戦略の策定】\n"
+            f"以下の形式で、まず議論戦略を立て、その後に実際の発言を生成してください。\n"
+            f"**思考：**\n"
+            f"1. **【主張の核】** (現在の状況で、勝利に最も貢献する主張の論点を簡潔に記述。例：占い師COの信用性を高める、〇〇の矛盾を追及する。)\n"
+            f"2. **【応答対象】** (直近の会話履歴から、**最も応答すべきプレイヤー**とその発言の要点を特定。)\n"
+            f"3. **【統合方針】** (主張の核と応答をどのように結びつけるか、議論の方針を記述。例：応答を起点にして、自分の主張に誘導する。)\n"
+            f"\n"
+            f"**発言：**\n"
+            f"（上記の思考に基づき、**100文字以内**で議論に応答しつつ主張を明確に伝える発言を生成。）\n"
         )
         
         return system_message, user_prompt
 
     def _call_openai_api(self) -> str | None:
-        """OpenAI APIを呼び出して応答を取得する."""
+        """OpenAI APIを呼び出し、CoTテンプレートに基づいて応答を取得・解析する。"""
         if not self.openai_client:
             return None
 
+        # 1. LLMへのプロンプト生成
         try:
+            # _create_talk_prompt は System Message と User Prompt を生成する
             system_message, user_prompt = self._create_talk_prompt()
             
+            # 2. LLM APIコール
             response = self.openai_client.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=200, 
-                temperature=0.7, # 創造性の調整（0.0で確定的、1.0で多様）
+                max_tokens=350,  # 思考プロセスを含めるため、トークン数を増やす
+                temperature=0.7, # 創造性の調整
             )
             
-            talk_content = response.choices[0].message.content.strip()
-            self.agent_logger.logger.info("LLM Response: %s", talk_content)
-            return talk_content
+            talk_content_full = response.choices[0].message.content.strip()
+            
+            # 3. 応答の解析と抽出（「発言：」のラベルを基に）
+            if "発言：" in talk_content_full:
+                # 「発言：」より前の部分を思考プロセス（戦略ログ）として分離
+                parts = talk_content_full.split("発言：", 1)
+                
+                # 戦略ログをデバッグ/分析用に記録
+                strategy_log = parts[0].strip()
+                self.agent_logger.logger.info("LLM Strategy (Internal COG): %s", strategy_log)
+                
+                # 最終的な発言内容を抽出
+                talk_content = parts[1].strip()
+                
+                # 必要に応じて、発言内容が長すぎる場合のトリミング処理などを追加
+                if len(talk_content) > 100:
+                    talk_content = talk_content[:100] # 最大文字数を超えないように調整
+                    self.agent_logger.logger.warning("Talk content truncated to 100 chars.")
+                
+                self.agent_logger.logger.info("LLM Response (Final Talk): %s", talk_content)
+                return talk_content
+            
+            # 4. テンプレートに従わなかった場合のフォールバック
+            else:
+                self.agent_logger.logger.warning("LLM response did not contain the '発言：' tag. Returning full content as talk.")
+                # 思考と発言が分離できなかった場合も、一応発言として試みる
+                talk_content = talk_content_full[:100] if len(talk_content_full) > 100 else talk_content_full
+                return talk_content
             
         except APIError as e:
             self.agent_logger.logger.error("OpenAI API Error: %s", e)
