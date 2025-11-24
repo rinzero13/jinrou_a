@@ -340,3 +340,15 @@ tts_broadcaster:
     - "1"
     - -f
     - mpegts
+
+
+# module settings
+custom_modules:
+  # M3: 発話方針決定・応答生成モジュール (主張の核+応答)
+  enable_module_policy: true
+  # M2: 嘘戦略・意図決定モジュール (嘘の使用・戦略拡張)
+  enable_module_lie: true
+  # M1: 論理的一貫性判定・修正機構 (矛盾判定と再生成ループ)
+  enable_module_consistency: true
+  # M1による修正を行う場合の最大試行回数
+  max_regeneration_attempts: 3
