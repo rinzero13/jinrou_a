@@ -25,9 +25,9 @@ game:
       count_in_word: false
       count_spaces: false
       per_talk: -1
-      mention_length: 50
+      mention_length: 125
       per_agent: -1
-      base_length: 50
+      base_length: 125
     max_skip: 0
   whisper:
     max_count:
