@@ -61,7 +61,7 @@ class LogicalConsistencyChecker:
     def check(self, game_info: Info, talk_history: list[Talk], virtual_talk: str, agent_name: str) -> tuple[bool, str]:
         """発話の論理的一貫性をLLMで判定する。"""
         if not self.openai_client:
-            self.logger.warning("OpenAI client not initialized. Skipping consistency check (M1).")
+            self.logger.logger.warning("OpenAI client not initialized. Skipping consistency check (M1).")
             return True, ""
 
         system_message, user_prompt = self._create_checker_prompt(game_info, talk_history, virtual_talk, agent_name)
@@ -85,17 +85,17 @@ class LogicalConsistencyChecker:
                 is_consistent = result.get("is_consistent", False)
                 reason = result.get("reasoning", "詳細な理由が見つかりませんでした。")
                 
-                self.logger.info(f"M1 Check Result: Consistent={is_consistent}, Reason={reason[:50]}...")
+                self.logger.logger.info(f"M1 Check Result: Consistent={is_consistent}, Reason={reason[:50]}...")
                 return is_consistent, reason
                 
             except json.JSONDecodeError:
-                self.logger.error(f"M1 Checker failed to parse JSON: {response_content[:100]}...")
+                self.logger.logger.error(f"M1 Checker failed to parse JSON: {response_content[:100]}...")
                 # 解析失敗時は安全のため矛盾なし(true)として扱う
                 return True, "JSON解析エラーによりスキップされました。"
                 
         except APIError as e:
-            self.logger.error("M1 Checker OpenAI API Error: %s", e)
+            self.logger.logger.error("M1 Checker OpenAI API Error: %s", e)
             return True, "APIエラーによりスキップされました。"
         except Exception as e:
-            self.logger.error("M1 Checker unexpected error: %s", e)
+            self.logger.logger.error("M1 Checker unexpected error: %s", e)
             return True, "予期せぬエラーによりスキップされました。"

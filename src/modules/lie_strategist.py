@@ -1,4 +1,4 @@
-# src/modules/lie_strategist.py (修正案)
+# src/modules/lie_strategist.py (具体的な実装案)
 
 from aiwolf_nlp_common.packet import Role
 from utils.agent_logger import AgentLogger
@@ -7,27 +7,64 @@ class LieStrategyModule:
     def __init__(self, logger: AgentLogger):
         self.logger = logger
         
-    # メソッド名を変更: 戦略決定のための指示を生成する
     def get_strategy_decision_instructions(self, role: Role) -> str:
-        """M2: 嘘戦略の有無と拡張された目標をJSONで決定させるための指示を生成する。"""
-        if role == Role.WEREWOLF or role == Role.POSSESSED:
-            instructions = (
-                "【M2: 嘘戦略の拡張決定】\n"
-                "あなたは、M3モジュールで決定された**主張の核**（User Promptに記載）に基づき、**嘘戦略**の要否を決定します。\n"
-                
-                "### 1. 嘘の使用要否と目標の拡張\n"
-                "あなたの役職（人狼または狂人）の勝利のために、主張の核を達成するために**意図的な嘘や偽のCO**が必要か判断してください。\n"
-                "嘘を使用する場合は `lie_used` を `true` とし、目標をより具体的で欺瞞的な内容に**拡張**してください。\n"
-                
-                "\n【出力形式】:\n"
-                "思考プロセスは不要です。必ず以下の**JSON形式**で、**唯一のオブジェクト**を出力してください。\n"
-                "```json\n"
-                "{\n"
-                "  \"lie_used\": true | false,\n"
-                "  \"extended_goal\": \"[嘘戦略を組み込んだ最終的な目標を記述。嘘なしの場合は主張の核をそのまま記述]\"\n"
-                "}\n"
-                "```\n"
-            )
-            self.logger.debug("M2 Lie strategy decision instructions generated for external call.")
-            return instructions
-        return "" # 村人陣営の場合は指示を返さない
+        """
+        M2: M3の計画に基づき、嘘戦略の有無を決定し、リスク評価と目標の拡張をJSONで決定させるための指示を生成する。
+        
+        Args:
+            role (Role): 現在の役職。
+        
+        Returns:
+            str: LLMに渡すプロンプト指示。
+        """
+        
+        instructions = (
+            "【M2: 戦略的嘘の拡張決定】\n"
+            "あなたは、M3モジュールで決定された**主張の核**（User Promptに記載）に基づき、その目標を達成するために「**戦略的な嘘（情報隠蔽・ブラフを含む）**」が必要か否かを評価・決定します。\n"
+        )
+
+        # 1. 嘘の分類表
+        instructions += (
+            "### 嘘の分類と目的\n"
+            "あなたの決定する嘘は、以下のいずれかの分類に該当します。この分類から**最も戦略的に有利**なものを選択し、`lie_type`として出力してください。\n"
+            "| 分類タイプ | 目的 |\n"
+            "| :--- | :--- | :--- |\n"
+            "| **Malicious Deception** | **攻撃/情報操作:** 相手に不利益を与え、議論を誤った方向へ誘導する。 |\n"
+            "| **Strategic Bluff/Defense**| **防御/生存:** 自分や味方を守るため、情報公開のタイミングを操作するため、事実を意図的に歪曲・隠蔽する。 |\n"
+            "| **Omission** | **情報隠蔽:** 事実の一部を意図的に語らないことで、リスクを回避する。 |\n"
+        )
+        
+        # 2. 評価ロジックと嘘の「必要なし」パターンの明示
+        instructions += (
+            "\n### 評価ロジックと目標の決定\n"
+            "**【意思決定の原則】**：常に「**勝利への貢献度** > **リスク**」となる選択をしてください。\n"
+            
+            "**1. 仮想リスク・リターン評価:** \n"
+            "   - **リスク（コスト）:** この嘘が露見した場合、あなたや勝利に必須の味方（真の占い師など）が吊られる確率は？（過去の自分の発言・行動との矛盾も考慮）\n"
+            "   - **リターン（利益）:** この嘘が成功した場合、あなたの陣営の**勝利確率**はどれだけ向上するか？\n"
+            
+            "**2. 論理的自己検証:** 提案する嘘は、**論理的一貫性チェッカー（M1）を通過可能**な、論理的に完璧な**ブラフ**として構築できますか？\n"
+
+            "\n**【嘘が不要なパターン (lie_used: false) の決定】**\n"
+            "**以下のいずれかに該当する場合、`lie_used: false` を選択してください。**\n"
+            "A. M3の主張の核（core_goal）が、**嘘を使わなくても十分な効果**を発揮する場合。\n"
+            "B. 嘘を使うことのリスク（露見による自身の吊りなど）が**リターンを上回る**場合。\n"
+            "C. 提示できる有効な嘘戦略がなく、**真実を語るのが最も安全な防御**となる場合。\n"
+        )
+        
+        # 3. JSON出力形式
+        instructions += (
+            "\n【出力形式】:\n"
+            "思考プロセスは不要です。必ず以下の**JSON形式**で、**唯一のオブジェクト**を出力してください。\n"
+            "**`lie_used: false` の場合、`extended_goal`はM3の主張の核と**同一の文字列**を記述してください。**\n"
+            "```json\n"
+            "{\n"
+            "  \"lie_used\": true | false,\n"
+            "  \"lie_type\": \"[上記分類表から選択したタイプを記述。lie_used: falseの場合は 'None']\",\n"
+            "  \"risk_rating\": \"Low\" | \"Medium\" | \"High\" | \"None\",\n"
+            "  \"extended_goal\": \"[嘘戦略を組み込んだ最終目標を記述。lie_used: falseの場合はM3の主張の核をそのまま記述]\"\n"
+            "}\n"
+            "```\n"
+        )
+        self.logger.logger.debug("M2 Lie strategy decision instructions generated with explicit 'false' pattern.")
+        return instructions
