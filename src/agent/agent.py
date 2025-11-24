@@ -22,6 +22,8 @@ from modules.policy_generator import UtterancePolicyGenerator
 from modules.lie_strategist import LieStrategyModule
 from modules.consistency_checker import LogicalConsistencyChecker
 
+import json
+
 LLM_MODEL = "gpt-3.5-turbo"
 
 if TYPE_CHECKING:
@@ -287,7 +289,7 @@ class Agent:
 
 # src/agent/agent.py (Agentクラス内)
 
-    def _create_talk_prompt(self, regeneration_feedback: str = None) -> tuple[str, str]:
+    def _create_talk_prompt(self, m3_plan: dict, m2_strategy: dict, regeneration_feedback: str = None) -> tuple[str, str]:
             """
             LLMへのシステムメッセージとユーザープロンプトを生成する。
             M3とM2の指示を統合し、M1からの矛盾修正指示（regeneration_feedback）を組み込む。
@@ -311,21 +313,12 @@ class Agent:
             # 2. システムメッセージ (System Message) の構築
             # ----------------------------------------------------
             system_message = (
-                f"あなたはAIWolf人狼ゲームのエージェント【{agent_display_name}】（ID：{self.agent_name}）です。あなたの役職は【{self.role.name}】です。\n"
                 f"目的は役職の勝利条件を達成することです。\n"
-                f"発言は**100文字以内**の簡潔な日本語で、あなたの役職が疑われないように行ってください。\n"
-                f"**最終的な出力は、思考プロセスと発言内容を明確に区別し、必ず【発言：】というラベルを付けてください。**\n"
+                f"**【重要】発言は**`【発言：】`**の直後に記述し、その内容は**厳密に120文字以内**の簡潔な日本語で、あなたの役職が疑われないように行ってください。\n" 
+                f"**最終的な出力の形式を厳守してください。発言内容の直前には必ず**`【発言：】`**というラベルを付けてください。**`【発言：】`**より前の思考プロセスは、ゲーム内で発言されません。あなたの**最終的な発言**は、`【発言：】`ラベルの直後の内容のみが採用されます。\n"  
             )
             
-            # --- M3: 発話方針決定・応答生成の指示の組み込み ---
-            if self.USE_M3_POLICY and self.M3_Policy:
-                system_message += self.M3_Policy.get_policy_instructions(self.role)
-            
-            # --- M2: 嘘戦略・意図決定の指示の組み込み ---
-            if self.USE_M2_LIE and self.M2_Lie:
-                system_message += self.M2_Lie.get_lie_strategy_instructions(self.role)
-            
-            # --- 役職ごとの具体的な戦略的指示（既存ロジックの継承）---
+            # --- 役職ごとの具体的な戦略的指示---
             match self.role:
                 case Role.WEREWOLF:
                     system_message += "あなたは人狼です。正体を隠し、村人陣営の疑いをそらすことが最重要です。他のプレイヤーへの協力を装いつつ、村人同士の対立を煽り、議論を有利な方向へ誘導してください。特定のプレイヤーの発言の矛盾や信頼性を具体的に指摘しなさい。\n"
@@ -338,10 +331,10 @@ class Agent:
 
             # --- M1: 論理矛盾修正指示の組み込み（再生成ループ時のみ） ---
             if regeneration_feedback:
-                system_message += f"\n\n**【重要：論理矛盾の修正指示】**\n"
+                system_message += f"\n\n**【論理矛盾の修正指示】**\n"
                 system_message += f"あなたの前回の発言は以下の点で論理的に矛盾していると判定されました。**この修正指示を完全に反映し、矛盾を解消した発言を再生成してください。**\n"
                 system_message += f"修正理由: {regeneration_feedback}\n"
-                self.agent_logger.warning("M1 feedback integrated into system prompt for regeneration.")
+                self.agent_logger.logger.warning("M1 feedback integrated into system prompt for regeneration.")
 
             # ----------------------------------------------------
             # 3. ユーザープロンプト (User Prompt) の構築
@@ -349,22 +342,46 @@ class Agent:
             
             game_state_summary = self._summarize_game_state()
             formatted_history = self._format_talk_history()
-            cot_prompt = self._create_cot_prompt()
+            
+            # ★M3/M2の結果をUser Promptのコンテキストとして追加（検証対応）★
+            strategy_context = ""
+            
+            # M3またはM2のプランが存在する場合のみコンテキストを生成する
+            if m3_plan or m2_strategy:
+                # M3情報
+                m3_core_goal = m3_plan.get('core_goal', '情報収集に徹する')
+                m3_response_policy = m3_plan.get('response_policy', 'PRIORITIZE_CORE')
+                
+                # M2情報 (M2が無効で空のdictの場合、extended_goalはcore_goalと同じになる)
+                m2_extended_goal = m2_strategy.get('extended_goal', m3_core_goal)
+                m2_lie_used = 'はい' if m2_strategy.get('lie_used') else 'いいえ'
+
+                # モジュール使用時のみ表示されるコンテキスト
+                strategy_context = (
+                    "\n----------------------------------------------------\n"
+                    "**【事前決定された戦略的目標と方針】**\n"
+                    f"**1. 主張の核 (Core Goal):** {m3_core_goal}\n"
+                    f"**2. 議論への対応方針 (Response Policy):** {m3_response_policy} (RESPOND_CRITICALLYの場合、直前の発言への応答を最優先してください)\n"
+                    f"**3. 嘘戦略の使用:** {m2_lie_used}\n"
+                    f"**4. 最終的な行動目標:** {m2_extended_goal} (これがあなたの発言の目標です)\n"
+                    "----------------------------------------------------\n"
+                )
 
             user_prompt = f"""
+                あなたは {agent_display_name} です。
+
                 【現在のゲーム情報】
                 {game_state_summary}
+
+                {strategy_context}
 
                 【これまでの会話履歴（直近10件）】
                 {formatted_history}
 
                 【あなたの発言決定プロセス】
-                あなたの役職の勝利のために、これらの情報に基づき、発言内容を決定してください。
-
-                {cot_prompt}"""
-
+                情報を踏まえて、目標達成のために発言内容を120字以内で決定してください。
+            """
             return system_message, user_prompt
-
     # ----------------------------------------------------------------------
     # Agent ID と Agent Name のマッピングに関するヘルパー関数
     # ----------------------------------------------------------------------
@@ -378,7 +395,7 @@ class Agent:
             return self.agent_name
 
     def _get_role_knowledge(self) -> str:
-        """役職固有の確定情報を返す。（修正不要だが再掲）"""
+        """役職固有の確定情報を返す。"""
         # Role のインポートが必要 (ファイル上部に from aiwolf_nlp_common.packet import Role があるはず)
         if self.role == Role.WEREWOLF: return "相方人狼、狂人、襲撃対象"
         if self.role == Role.SEER: return "過去の占い結果"
@@ -392,8 +409,6 @@ class Agent:
         # status_map から生存エージェントの名前を取得
         alive_agent_names = [k for k, v in self.info.status_map.items() if v == 'ALIVE']
         
-        # executed_agent や attacked_agent は Info オブジェクトに Agent Name (シズエなど) 
-        # または Agent ID (kanolabX) で格納されているため、そのまま表示します。
         executed = self.info.executed_agent if self.info.executed_agent else "なし"
         attacked = self.info.attacked_agent if self.info.attacked_agent else "なし"
         
@@ -406,41 +421,143 @@ class Agent:
         )
 
     def _format_talk_history(self) -> str:
-        """会話履歴を整形する。（Agent ID/Nameマッピングに依存しない形に修正）"""
+        """会話履歴を整形する。"""
         formatted = []
-        # talk.agent には Agent Name (シズエなど) が格納されていると推測されるため、そのまま使用
+        
         for talk in self.talk_history[-10:]:
             speaker = talk.agent 
             formatted.append(f"D{talk.day} {speaker}: {talk.text}")
         return "\n".join(formatted) if formatted else "まだ会話はありません。"
         
-    def _create_cot_prompt(self) -> str:
-        """CoTプロンプトを返す。（修正不要だが再掲）"""
-        return (
-            "**思考プロセス (Chain of Thought):**\n"
-            "1. 現在の状況分析（勝敗条件と役職）:...\n"
-            "2. 最適な次の行動（投票・CO・護衛・襲撃など）:...\n"
-            "3. (M3) 主張の核と応答の決定:...\n"
-            "4. (M2) 嘘の使用の有無と論理の構築:...\n"
-            "5. 最終的な発言内容:...\n"
-            "（この思考プロセスは発言には含めず、最終的な「発言：」のみを続けて出力すること）"
+
+    # ----------------------------------------------------------------------   
+    def _safe_json_parse(self, content: str, fallback_data: dict) -> dict:
+        """LLM応答からJSONをロバストにパースする。"""
+        try:
+            # LLMがJSONの前後に説明文などを付加する場合を考慮し、最初の '{' から最後の '}' までを抽出
+            json_start = content.find('{')
+            json_end = content.rfind('}')
+            if json_start == -1 or json_end == -1:
+                self.agent_logger.logger.warning(f"JSON marker not found in response: {content[:50]}...")
+                return fallback_data
+            
+            json_str = content[json_start:json_end+1]
+            return json.loads(json_str)
+        except Exception as e:
+            self.agent_logger.logger.error(f"JSON parsing failed. Error: {e}. Content: {content[:50]}...")
+            return fallback_data
+
+
+    def _query_llm_for_strategy(self, prompt_context: str, fallback_data: dict) -> dict:
+        """
+        戦略決定（M3/M2）専用のLLMコールを行う。
+        安定したJSON出力を得るため、専用のSystem Messageと低温度設定を使用する。
+        """
+        if not self.openai_client:
+            self.agent_logger.logger.error("OpenAI client not initialized. Cannot query strategy LLM.")
+            return fallback_data
+
+        # JSON出力を強制するためのSystem Message
+        system_msg = (
+            "あなたは与えられた情報に基づき、戦略的な計画をJSON形式で出力する専門のAIです。\n"
+            "思考プロセス、説明、Markdown形式（```json```）など、**JSONオブジェクト以外の一切のテキスト**は含めないでください。**厳密にJSONオブジェクトのみ**を出力してください。"
         )
+        
+        try:
+            response = self.openai_client.chat.completions.create(
+                model=LLM_MODEL, # 最終発話とモデルを分けることも可能
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt_context},
+                ],
+                temperature=0.2, # 創造性を抑え、一貫性を重視
+                max_tokens=500,
+            )
+            content = response.choices[0].message.content.strip()
+            return self._safe_json_parse(content, fallback_data)
+            
+        except Exception as e:
+            self.agent_logger.logger.error(f"Strategy LLM API call failed: {e}")
+            return fallback_data
+
+
+    def _get_m3_plan_from_llm(self) -> dict:
+        """M3: 主張の核と応答方針をLLMに問い合わせて決定する。（モジュール不使用時は空の辞書を返す）"""
+        fallback_data = {"core_goal": "状況を注意深く観察する", "response_policy": "PRIORITIZE_CORE", "response_target_id": "NONE"}
+        
+        if not self.USE_M3_POLICY or not self.M3_Policy:
+            self.agent_logger.logger.info("M3 Policy Generator is disabled. Using default plan.")
+            return {} # 空の辞書を返し、_create_talk_promptでデフォルト処理される
+
+        self.agent_logger.logger.debug("M3: Planning LLM call initiated.")
+        
+        # M3専用のプロンプトを構築
+        m3_instructions = self.M3_Policy.get_planning_prompt_instructions(self.role)
+        prompt_context = f"""
+        {m3_instructions}
+
+        【現在のゲーム情報】
+        {self._summarize_game_state()}
+        【直前の発話】
+        {self._format_talk_history(limit=1)}
+        """
+        
+        return self._query_llm_for_strategy(prompt_context, fallback_data)
+
+
+    #### B. M2: 嘘戦略の決定
+    # M2_Lie は LieStrategyModule のインスタンスを想定
+
+    def _get_m2_strategy_from_llm(self, m3_plan: dict) -> dict:
+        """M2: M3の計画に基づき、嘘戦略の有無を決定する。（モジュール不使用時は空の辞書を返す）"""
+        
+        # M2モジュール不使用の場合、または人狼陣営以外はスキップ
+        if not self.USE_M2_LIE or self.role not in [Role.WEREWOLF, Role.POSSESSED] or not self.M2_Lie:
+            return {}
+        
+        core_goal = m3_plan.get('core_goal', '情報収集に徹する')
+        fallback_data = {"lie_used": False, "extended_goal": core_goal}
+
+        self.agent_logger.logger.debug("M2: Lie strategy LLM call initiated.")
+        
+        # M2専用のプロンプトを構築
+        m2_instructions = self.M2_Lie.get_strategy_decision_instructions(self.role)
+        prompt_context = f"""
+        {m2_instructions}
+
+        【あなたの役職情報】
+        役職: {self.role.name} / 知っている情報: {self._get_role_knowledge()}
+        【M3決定された主張の核】
+        {core_goal}
+        """
+        
+        return self._query_llm_for_strategy(prompt_context, fallback_data)
     # ---------------------------------------------
 
     def _call_openai_api(self) -> str | None:
         """OpenAI APIを呼び出し、モジュールパイプラインに従って応答を取得・解析する。"""
         if not self.openai_client:
             return None
+        
+        # 【M3/M2の事前戦略決定】
+        # -------------------------------------------------------------------
+        # モジュールが有効な場合はLLMコールを行い、無効な場合は空の辞書（{}）を取得する。
+        m3_plan = self._get_m3_plan_from_llm() 
+        m2_strategy = self._get_m2_strategy_from_llm(m3_plan)
 
-        # M1: 論理的一貫性判定・修正のためのループ
+        # 【M1: 論理的一貫性判定・修正のためのループ】
         feedback = None
         for attempt in range(self.MAX_REGENERATION_ATTEMPTS):
             # 1. LLMへのプロンプト生成 (M3/M2の指示を統合、またはM1のフィードバックを組み込む)
-            system_message, user_prompt = self._create_talk_prompt(regeneration_feedback=feedback)
-            
+            system_message, user_prompt = self._create_talk_prompt(
+                        m3_plan=m3_plan, 
+                        m2_strategy=m2_strategy, 
+                        regeneration_feedback=feedback
+                    )
+
+
             try:
                 # 2. LLM APIコール (仮想発話の生成)
-                # ... (既存のAPIコールコード) ...
                 response = self.openai_client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=[
@@ -454,15 +571,13 @@ class Agent:
                 talk_content_full = response.choices[0].message.content.strip()
                 
                 # 3. 応答の解析と抽出（「発言：」のラベルを基に）
-                # ... (既存の応答解析コード) ...
-                
-                if "発言：" in talk_content_full:
-                    parts = talk_content_full.split("発言：", 1)
+                if "【発言：】" in talk_content_full:
+                    parts = talk_content_full.split("【発言：】", 1)
                     strategy_log = parts[0].strip()
                     talk_content = parts[1].strip()
                     
-                    if len(talk_content) > 100:
-                        talk_content = talk_content[:100]
+                    if len(talk_content) > 125:
+                        talk_content = talk_content[:125]
 
                     self.agent_logger.logger.info(f"Attempt {attempt+1}: LLM Strategy (Internal COG): {strategy_log[:50]}...")
                     self.agent_logger.logger.info(f"Attempt {attempt+1}: LLM Response (Virtual Talk): {talk_content}")
