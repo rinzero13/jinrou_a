@@ -24,7 +24,7 @@ from modules.consistency_checker import LogicalConsistencyChecker
 
 import json
 
-LLM_MODEL = "gpt-4o-mini"
+LLM_MODEL = "gpt-3.5-turbo"  # 発話生成用のモデル
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -66,6 +66,23 @@ class Agent:
         self.whisper_history: list[Talk] = []
         self.role = role
 
+        # ログファイルパスの設定
+        # AgentLoggerが self.log_dir 属性を持つことを前提とする
+        if hasattr(self.agent_logger, 'log_dir'):
+            log_dir = self.agent_logger.log_dir
+            # Strategy Log Pathの設定
+            self.strategy_log_path = log_dir / f"strategy_decision_{name}_{game_id}.jsonl"
+            
+            # ディレクトリが存在しない場合は作成（AgentLogger側で既に作成済みだが念のため）
+            # log_dir.mkdir(parents=True, exist_ok=True) # AgentLogger側で作成済みのため省略可能
+            self.agent_logger.logger.info(f"Strategy log path: {self.strategy_log_path}")
+        else:
+            # AgentLoggerがファイル出力を無効化している場合、戦略ロギングを無効化
+            self.strategy_log_path = None
+            self.agent_logger.logger.warning("AgentLogger did not initialize a log directory. Strategy logging disabled.")
+        # ---------------------------------------------
+        # ---------------------------------------------
+
         # --- OpenAIクライアントの初期化 ---
         self.openai_client: OpenAI | None = None
         if os.getenv("OPENAI_API_KEY"):
@@ -82,9 +99,9 @@ class Agent:
         # --- カスタムモジュールの設定と初期化 ---
         module_settings = self.config.get("custom_modules", {})
         
-        self.USE_M3_POLICY = module_settings.get("enable_module_policy", True)
-        self.USE_M2_LIE = module_settings.get("enable_module_lie", True)
-        self.USE_M1_CONSISTENCY = module_settings.get("enable_module_consistency", True)
+        self.USE_M3_POLICY = module_settings.get("enable_module_policy", False)
+        self.USE_M2_LIE = module_settings.get("enable_module_lie", False)
+        self.USE_M1_CONSISTENCY = module_settings.get("enable_module_consistency", False)
         self.MAX_REGENERATION_ATTEMPTS = module_settings.get("max_regeneration_attempts", 2)
 
         # モジュールインスタンスの作成
@@ -395,44 +412,48 @@ class Agent:
             return self.agent_name
     
     def _get_role_knowledge(self) -> str:
-            """役職固有の確定情報を返す。
-            
-            Returns:
-                str: 役職が知っている確定情報。
-            """
-            # self.info が None の場合は、情報がないことを示す
+            """役職ごとの知っている情報を取得する。"""
             if not self.info:
                 return "初期情報なし。"
 
-            # 役職に応じて知っている情報を構築
             match self.role:
                 case Role.WEREWOLF:
-                    # info.werewolf_agent_list には人狼game内の人狼エージェント名が含まれる
-                    wolf_list = [a for a in self.info.werewolf_agent_list if a != self.agent_name]
+                    wolf_list = getattr(self.info, 'werewolf_agent_list', [])
+                    if not isinstance(wolf_list, list):
+                        wolf_list = []
+                    wolf_list = [a for a in wolf_list if a != self.agent_name]
                     return f"人狼仲間: {', '.join(wolf_list)}、勝利条件: 村人陣営の数を人狼陣営の数以下にする。"
                 
                 case Role.SEER:
-                    # 占い師は占い結果を info.divine_result に知る
-                    divine_result = self.info.divine_result.get(self.info.day) if self.info.divine_result else None
-                    if divine_result:
-                        results = [f"{k} -> {v.name}" for k, v in divine_result.items()] # Role を名前に変換
-                        return f"これまでの占い結果: {', '.join(results)}。"
-                    else:
-                        return "まだ占い結果は出ていません。"
+                    all_divine_results = getattr(self.info, 'divine_result', {})
+                    results = []
+                    if isinstance(all_divine_results, dict):
+                        for day, day_results in all_divine_results.items():
+                            if isinstance(day_results, dict):
+                                for target, role in day_results.items():
+                                    role_name = role.name if hasattr(role, 'name') else str(role)
+                                    results.append(f"Day{day} {target} -> {role_name}")
+                    return f"これまでの占い結果: {', '.join(results) if results else 'まだ占い結果は出ていません。'}。"
 
                 case Role.MEDIUM:
-                    # 霊媒師は霊媒結果を info.medium_result に知る
-                    medium_result = self.info.medium_result.get(self.info.day) if self.info.medium_result else None
-                    if medium_result:
-                        results = [f"{k} (前日追放) -> {v.name}" for k, v in medium_result.items()] # Role を名前に変換
-                        return f"これまでの霊媒結果: {', '.join(results)}。"
-                    else:
-                        return "まだ霊媒結果は出ていません。"
+                    all_medium_results = getattr(self.info, 'medium_result', {})
+                    results = []
+                    if isinstance(all_medium_results, dict):
+                        for day, day_results in all_medium_results.items():
+                            if isinstance(day_results, dict):
+                                for target, role in day_results.items():
+                                    role_name = role.name if hasattr(role, 'name') else str(role)
+                                    results.append(f"Day{day} {target} (追放) -> {role_name}")
+                    return f"これまでの霊媒結果: {', '.join(results) if results else 'まだ霊媒結果は出ていません。'}。"
 
                 case Role.BODYGUARD:
-                    # 狩人は護衛結果を info.guarded_agent に知る
-                    return f"護衛結果（前日夜）：{self.info.guarded_agent if self.info.guarded_agent else 'なし'}。"
-
+                    guarded_agent = getattr(self.info, 'guarded_agent', 'なし')
+                    if guarded_agent is None:
+                        guarded_agent = 'なし'
+                    return f"護衛結果（前日夜）：{guarded_agent}。"
+                
+                case _:
+                    return "特に確定情報はありません。"
 
     def _summarize_game_state(self) -> str:
         """現在のゲーム状況をサマリーする。（agent_list依存を解消）"""
@@ -468,28 +489,36 @@ class Agent:
         return "\n".join(formatted) if formatted else "まだ会話はありません。"
     
     # ----------------------------------------------------------------------
-    def _log_strategy_decision(self, m3_plan: dict, m2_strategy: dict, strategy_log: str, final_talk: str) -> None:
-        """決定された戦略、LLMの思考プロセス、および最終発言をJSONLファイルに記録する。"""
-        
-        # M3/M2の結果は、モジュールが無効の場合に空の辞書 {} となるため、適切にログに記録する。
-        
-        log_entry = {
-            "day": self.info.day if self.info else 0,
-            "role": self.role.name,
-            "is_m3_used": bool(self.USE_M3_POLICY),
-            "is_m2_used": bool(self.USE_M2_LIE),
-            "m3_plan": m3_plan if self.USE_M3_POLICY else {},
-            "m2_strategy": m2_strategy if self.USE_M2_LIE else {},
-            "llm_strategy_log": strategy_log,  # 【発言：】より前のLLMの思考
-            "final_talk": final_talk,          # 最終発言
-        }
-        
-        try:
-            with self.strategy_log_path.open(mode="a", encoding="utf-8") as f:
-                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-            self.agent_logger.logger.debug("Strategy decision logged.")
-        except Exception as e:
-            self.agent_logger.logger.error(f"Failed to write strategy log file: {e}")
+    def _log_strategy_decision(self, m3_plan: dict, m2_strategy: dict, strategy_log: str, final_talk: str, system_prompt: str, user_prompt: str) -> None: # <-- 修正: プロンプト引数を追加
+            """決定された戦略、LLMの思考プロセス、および最終発言をJSONLファイルに記録する。"""
+            
+            if not self.strategy_log_path: # <-- このチェックで log_dir がNoneの場合のエラーを防ぎます
+                self.agent_logger.logger.warning("Strategy log path is not set. Skipping log decision.")
+                return
+
+            # M3/M2の結果は、モジュールが無効の場合に空の辞書 {} となるため、適切にログに記録する。
+            
+            log_entry = {
+                "day": self.info.day if self.info else 0,
+                "role": self.role.name,
+                "is_m3_used": bool(self.USE_M3_POLICY),
+                "is_m2_used": bool(self.USE_M2_LIE),
+                "m3_plan": m3_plan if self.USE_M3_POLICY else {},
+                "m2_strategy": m2_strategy if self.USE_M2_LIE else {},
+                "llm_strategy_log": strategy_log,      # 【発言：】より前のLLMの思考
+                "final_talk": final_talk,              # 最終発言
+                # <-- 追加: プロンプト全体をログに記録
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            }
+            
+            try:
+                # self.strategy_log_path を使用 (__init__で定義済み)
+                with self.strategy_log_path.open(mode="a", encoding="utf-8") as f: 
+                    f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+                self.agent_logger.logger.debug("Strategy decision logged.")
+            except Exception as e:
+                self.agent_logger.logger.error(f"Failed to write strategy log file: {e}")
     # ----------------------------------------------------------------------   
     def _safe_json_parse(self, content: str, fallback_data: dict) -> dict:
         """LLM応答からJSONをロバストにパースする。"""
@@ -593,7 +622,6 @@ class Agent:
         
         return self._query_llm_for_strategy(prompt_context, fallback_data)
     # ---------------------------------------------
-
     def _call_openai_api(self) -> str | None:
             """OpenAI APIを呼び出し、モジュールパイプラインに従って応答を取得・解析する。"""
             if not self.openai_client:
@@ -607,15 +635,20 @@ class Agent:
 
             # 【M1: 論理的一貫性判定・修正のためのループ】
             feedback = None
-            last_generated_talk = None  # 最後に生成された発言を保持する変数を追加
-
+            last_generated_talk = None
+            current_system_message = ""
+            current_user_prompt = ""
+            final_strategy_log = "" 
+            
             for attempt in range(self.MAX_REGENERATION_ATTEMPTS):
                 # 1. LLMへのプロンプト生成 (M3/M2の指示を統合、またはM1のフィードバックを組み込む)
                 system_message, user_prompt = self._create_talk_prompt(
-                                m3_plan=m3_plan, 
-                                m2_strategy=m2_strategy, 
-                                regeneration_feedback=feedback
-                            )
+                            m3_plan=m3_plan, 
+                            m2_strategy=m2_strategy, 
+                            regeneration_feedback=feedback
+                        )
+                current_system_message = system_message 
+                current_user_prompt = user_prompt
 
                 try:
                     # 2. LLM APIコール (仮想発話の生成)
@@ -630,8 +663,8 @@ class Agent:
                     )
                     
                     talk_content_full = response.choices[0].message.content.strip()
-                    talk_content = None # ループ内での発言内容をリセット
-
+                    talk_content = None
+                    
                     # 3. 応答の解析と抽出（「発言：」のラベルを基に）
                     if "【発言：】" in talk_content_full:
                         parts = talk_content_full.split("【発言：】", 1)
@@ -641,8 +674,9 @@ class Agent:
                         if len(talk_content) > 125:
                             talk_content = talk_content[:125]
 
-                        last_generated_talk = talk_content # <--- 最後に生成された発言を更新
-                        
+                        last_generated_talk = talk_content
+                        final_strategy_log = strategy_log
+
                         self.agent_logger.logger.info(f"Attempt {attempt+1}: LLM Strategy (Internal COG): {strategy_log[:50]}...")
                         self.agent_logger.logger.info(f"Attempt {attempt+1}: LLM Response (Virtual Talk): {talk_content}")
 
@@ -659,6 +693,8 @@ class Agent:
                             if is_consistent:
                                 # 矛盾なしと判定されたら、ループを終了して発言を返す
                                 self.agent_logger.logger.info("M1: Logical consistency check passed. Talk decided.")
+                                # <-- 修正/追加箇所: ログ関数呼び出し
+                                self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
                                 return talk_content
                             else:
                                 # 矛盾ありと判定されたら、feedbackを更新し、再生成へ
@@ -668,6 +704,8 @@ class Agent:
                         else:
                             # M1が無効の場合、チェックせずに発言を返す
                             self.agent_logger.logger.info("M1: Consistency check skipped (Module disabled). Talk decided.")
+                            # <-- 修正/追加箇所: ログ関数呼び出し
+                            self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
                             return talk_content
 
                     # テンプレートに従わなかった場合 (既存コードのフォールバック)
@@ -675,7 +713,8 @@ class Agent:
                         self.agent_logger.logger.warning("LLM response did not contain the '発言：' tag. Using full content as talk.")
                         talk_content = talk_content_full[:100] if len(talk_content_full) > 100 else talk_content_full
                         
-                        last_generated_talk = talk_content # <--- 最後に生成された発言を更新
+                        last_generated_talk = talk_content
+                        final_strategy_log = "" # テンプレート外の場合は思考ログなし
 
                         # テンプレート外でもM1はチェックすべき
                         if self.USE_M1_CONSISTENCY and self.M1_Consistency:
@@ -686,16 +725,16 @@ class Agent:
                                 agent_name=self.agent_name
                             )
                             if is_consistent:
+                                # <-- 修正/追加箇所: ログ関数呼び出し
+                                self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
                                 return talk_content
                             else:
                                 feedback = reason
                                 continue
                         
-                        # M1が無効、または最初の試行で矛盾なしの場合
-                        # この `return` の処理は、ループを抜けるのではなく、関数からすぐに値を返すことに注意してください。
-                        # M1有効時で矛盾ありの場合は `continue` になるため、これは「矛盾なし」と判定された場合、
-                        # あるいは M1 が無効な場合の処理と解釈できます。
-                        return talk_content 
+                        # <-- 修正/追加箇所: ログ関数呼び出し
+                        self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
+                        return talk_content # M1が無効、または最初の試行で矛盾なしの場合
 
                 except APIError as e:
                     self.agent_logger.logger.error("OpenAI API Error: %s", e)
@@ -707,14 +746,13 @@ class Agent:
             # ループを抜けたが有効な発言が得られなかった場合
             self.agent_logger.logger.warning("Failed to generate consistent talk after all attempts. Using last generated talk.")
             
-            # 最後の試行で生成された発言があればそれを返し、なければ既存のフォールバック（random.choice）を使用する
-            # APIエラーなどで全く発言が生成されなかった場合の安全策
             if last_generated_talk:
-                return last_generated_talk # <--- 最後に生成された文章を返す
+                # <-- 修正/追加箇所: 最後に生成されたものをログに記録
+                self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, last_generated_talk, current_system_message, current_user_prompt) 
+                return last_generated_talk
             else:
                 self.agent_logger.logger.warning("No talk was generated at all. Falling back to random choice.")
-                return random.choice(self.comments) # <--- 安全なフォールバック
-        
+                return random.choice(self.comments)
 
     @timeout
     def action(self) -> str | None:  # noqa: C901, PLR0911
