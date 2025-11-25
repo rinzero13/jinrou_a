@@ -37,6 +37,7 @@ class AgentLogger:
             name (str): Name of the agent for logging / ログ用のエージェント名
             game_id (str): Game ID for log file organization / ログファイル整理用のゲームID
         """
+
         self.config = config
         self.name = name
         self.logger = logging.getLogger(name)
@@ -61,6 +62,10 @@ class AgentLogger:
                     "%Y%m%d%H%M%S%f",
                 )[:-3]
             )
+            # --- 追加箇所 ---
+            self.log_dir = output_dir  # <--- 計算されたログディレクトリを保持
+            # --------------------
+
             output_dir.mkdir(
                 parents=True,
                 exist_ok=True,
