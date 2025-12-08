@@ -747,7 +747,7 @@ class Agent:
             self.agent_logger.logger.warning("Failed to generate consistent talk after all attempts. Using last generated talk.")
             
             if last_generated_talk:
-                # <-- 修正/追加箇所: 最後に生成されたものをログに記録
+                # 最後に生成されたものをログに記録
                 self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, last_generated_talk, current_system_message, current_user_prompt) 
                 return last_generated_talk
             else:
