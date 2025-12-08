@@ -24,7 +24,7 @@ from modules.consistency_checker import LogicalConsistencyChecker
 
 import json
 
-LLM_MODEL = "gpt-3.5-turbo"  # 発話生成用のモデル
+LLM_MODEL = "gpt-4o-mini"  # 発話生成用のモデル
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -99,8 +99,8 @@ class Agent:
         # --- カスタムモジュールの設定と初期化 ---
         module_settings = self.config.get("custom_modules", {})
         
-        self.USE_M3_POLICY = module_settings.get("enable_module_policy", False)
-        self.USE_M2_LIE = module_settings.get("enable_module_lie", False)
+        self.USE_M3_POLICY = module_settings.get("enable_module_policy", True)
+        self.USE_M2_LIE = module_settings.get("enable_module_lie", True)
         self.USE_M1_CONSISTENCY = module_settings.get("enable_module_consistency", False)
         self.MAX_REGENERATION_ATTEMPTS = module_settings.get("max_regeneration_attempts", 2)
 
