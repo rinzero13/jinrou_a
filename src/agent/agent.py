@@ -22,6 +22,8 @@ from modules.policy_generator import UtterancePolicyGenerator
 from modules.lie_strategist import LieStrategyModule
 from modules.consistency_checker import LogicalConsistencyChecker
 
+from modules.belief_model import BeliefModel 
+
 import json
 
 LLM_MODEL = "gpt-4o-mini"  # 発話生成用のモデル
@@ -110,6 +112,10 @@ class Agent:
         self.M2_Lie = LieStrategyModule(self.agent_logger) if self.USE_M2_LIE else None
         self.M1_Consistency = LogicalConsistencyChecker(self.agent_logger, self.openai_client) if self.USE_M1_CONSISTENCY and self.openai_client else None
         
+        # ---------------------------------------------
+
+        # --- 信念モデルの初期化 ---
+        self.BeliefModel = BeliefModel(self.agent_logger) 
         # ---------------------------------------------
 
         # 0日目に発言済みかどうかのフラグ
@@ -245,6 +251,12 @@ class Agent:
                     self.medium_results_history.append(result_dict)
         # -----------------------------------------------------------
 
+        # --- 信念モデルの更新 ---
+        if self.info and self.BeliefModel: 
+            # 最新のゲーム情報、全発話履歴、自身の役職を渡して確率を更新
+            self.BeliefModel.update(self.info, self.talk_history, self.role)
+        # ----------------------------
+
         self.agent_logger.logger.debug(packet)
 
     def get_alive_agents(self) -> list[str]:
@@ -276,6 +288,19 @@ class Agent:
         """
         # ゲーム開始時に０日目の発言フラグをリセット
         self.has_talked_on_day0 = False
+
+        # --- Belief Modelの初期化メソッド呼び出し ---
+        if self.BeliefModel and self.setting and self.info:
+            # Info.status_map のキー（キャラクター名）が全 Agent ID
+            # Info.status_mapには全Agentの状態が含まれるため、これをそのまま使う
+            all_agents = list(self.info.status_map.keys()) 
+            self.BeliefModel.initialize_probabilities(
+                my_agent_id=self.agent_name, 
+                my_role=self.role, 
+                game_setting=self.setting,
+                all_agents=all_agents # 全エージェントのリストを渡す
+            )
+        # ----------------------------------------------------
 
     def daily_initialize(self) -> None:
         """Perform processing for daily initialization request.
@@ -338,6 +363,12 @@ class Agent:
         Returns:
             str: Agent name to divine / 占い対象のエージェント名
         """
+
+        if self.BeliefModel and self.info:
+            target = self.BeliefModel.decide_target_for_divine(self.info.status_map) 
+            if target:
+                return target
+            
         return random.choice(self.get_alive_agents())  # noqa: S311
 
     def guard(self) -> str:
@@ -358,6 +389,12 @@ class Agent:
         Returns:
             str: Agent name to vote / 投票対象のエージェント名
         """
+
+        if self.BeliefModel and self.info:
+            target = self.BeliefModel.decide_target_for_vote(self.info.status_map) 
+            if target:
+                return target
+            
         return random.choice(self.get_alive_agents())  # noqa: S311
 
     def attack(self) -> str:
@@ -368,6 +405,12 @@ class Agent:
         Returns:
             str: Agent name to attack / 襲撃対象のエージェント名
         """
+
+        if self.BeliefModel and self.info:
+            target = self.BeliefModel.decide_target_for_attack(self.info.status_map) 
+            if target:
+                return target
+            
         return random.choice(self.get_alive_agents())  # noqa: S311
 
     def finish(self) -> None:
@@ -542,12 +585,18 @@ class Agent:
         executed = self.info.executed_agent if self.info.executed_agent else "なし"
         attacked = self.info.attacked_agent if self.info.attacked_agent else "なし"
         
+        belief_summary = ""
+        if self.BeliefModel:
+            belief_summary = self.BeliefModel.get_top_beliefs_summary() # BeliefModelの要約メソッドを呼び出す
+        
         return (
             f"日目: Day {self.info.day}\n"
             f"生存者: {', '.join(alive_agent_names)}\n"
             f"前回追放: {executed}\n"
             f"前回襲撃: {attacked}\n"
             f"あなたの役職の知っていること: {self._get_role_knowledge()}"
+            f"\n--- 信念モデルによる推定 ---\n"
+            f"{belief_summary}" # LLMへのプロンプトに含める
         )
 
     def _format_talk_history(self, limit: int = 10) -> str: # limit引数を追加し、デフォルト値を設定
