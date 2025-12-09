@@ -360,7 +360,7 @@ class Agent:
             game_state_summary = self._summarize_game_state()
             formatted_history = self._format_talk_history()
             
-            # ★M3/M2の結果をUser Promptのコンテキストとして追加（検証対応）★
+            # M3/M2の結果をUser Promptのコンテキストとして追加
             strategy_context = ""
             
             # M3またはM2のプランが存在する場合のみコンテキストを生成する
@@ -474,7 +474,7 @@ class Agent:
             f"あなたの役職の知っていること: {self._get_role_knowledge()}"
         )
 
-    def _format_talk_history(self, limit: int = 10) -> str: # ★修正: limit引数を追加し、デフォルト値を設定★
+    def _format_talk_history(self, limit: int = 10) -> str: # limit引数を追加し、デフォルト値を設定
         """会話履歴を整形する。オプションのlimitで表示件数を制限する。"""
         formatted = []
         
@@ -492,7 +492,7 @@ class Agent:
     def _log_strategy_decision(self, m3_plan: dict, m2_strategy: dict, strategy_log: str, final_talk: str, system_prompt: str, user_prompt: str) -> None: # <-- 修正: プロンプト引数を追加
             """決定された戦略、LLMの思考プロセス、および最終発言をJSONLファイルに記録する。"""
             
-            if not self.strategy_log_path: # <-- このチェックで log_dir がNoneの場合のエラーを防ぎます
+            if not self.strategy_log_path: # このチェックで log_dir がNoneの場合のエラーを防ぐ
                 self.agent_logger.logger.warning("Strategy log path is not set. Skipping log decision.")
                 return
 
@@ -507,7 +507,7 @@ class Agent:
                 "m2_strategy": m2_strategy if self.USE_M2_LIE else {},
                 "llm_strategy_log": strategy_log,      # 【発言：】より前のLLMの思考
                 "final_talk": final_talk,              # 最終発言
-                # <-- 追加: プロンプト全体をログに記録
+                # プロンプト全体をログに記録
                 "system_prompt": system_prompt,
                 "user_prompt": user_prompt,
             }
@@ -732,7 +732,7 @@ class Agent:
                                 feedback = reason
                                 continue
                         
-                        # <-- 修正/追加箇所: ログ関数呼び出し
+                        # ログ関数呼び出し
                         self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
                         return talk_content # M1が無効、または最初の試行で矛盾なしの場合
 
