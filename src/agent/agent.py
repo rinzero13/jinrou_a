@@ -24,7 +24,7 @@ from modules.consistency_checker import LogicalConsistencyChecker
 
 import json
 
-LLM_MODEL = "gpt-3.5-turbo"  # 発話生成用のモデル
+LLM_MODEL = "gpt-4o-mini"  # 発話生成用のモデル
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -99,7 +99,7 @@ class Agent:
         # --- カスタムモジュールの設定と初期化 ---
         module_settings = self.config.get("custom_modules", {})
         
-        self.USE_M3_POLICY = module_settings.get("enable_module_policy", False)
+        self.USE_M3_POLICY = module_settings.get("enable_module_policy", True)
         self.USE_M2_LIE = module_settings.get("enable_module_lie", False)
         self.USE_M1_CONSISTENCY = module_settings.get("enable_module_consistency", False)
         self.MAX_REGENERATION_ATTEMPTS = module_settings.get("max_regeneration_attempts", 2)
@@ -111,6 +111,15 @@ class Agent:
         self.M1_Consistency = LogicalConsistencyChecker(self.agent_logger, self.openai_client) if self.USE_M1_CONSISTENCY and self.openai_client else None
         
         # ---------------------------------------------
+
+        # 0日目に発言済みかどうかのフラグ
+        self.has_talked_on_day0 = False
+        # ---------------------------------------------
+
+        # ---占い/霊媒結果の履歴を保持するリストを初期化 ---
+        self.divine_results_history: list[dict[str, Any]] = []
+        self.medium_results_history: list[dict[str, Any]] = []
+        # -----------------------------------------------------------------
 
         self.comments: list[str] = []
         with Path.open(
@@ -189,6 +198,53 @@ class Agent:
         if self.request == Request.INITIALIZE:
             self.talk_history: list[Talk] = []
             self.whisper_history: list[Talk] = []
+            #占い結果/霊媒結果履歴のリセット
+            self.divine_results_history = []
+            self.medium_results_history = []
+
+        # --- 履歴の蓄積ロジック ---
+        if self.info and self.info.day > 0:
+            
+            # --- 占い結果の保存 ---
+            current_divine_result = getattr(self.info, 'divine_result', None)
+            
+            # Judgeオブジェクト（または類似の属性を持つオブジェクト）が存在する場合
+            if current_divine_result is not None and hasattr(current_divine_result, 'day'):
+                # 履歴に保存するための辞書形式に変換し、属性を参照
+                result_dict = {
+                    # day, agent, targetなどの属性をgetattrで安全に取得
+                    'day': getattr(current_divine_result, 'day', None),
+                    'agent': getattr(current_divine_result, 'agent', None),
+                    'target': getattr(current_divine_result, 'target', '不明'),
+                    # resultはRoleやSpeciesオブジェクトの可能性が高いため、.name属性があればそれを、なければ文字列化を試みる
+                    'result': getattr(getattr(current_divine_result, 'result', '不明'), 'name', str(getattr(current_divine_result, 'result', '不明'))),
+                }
+                
+                # 最新の結果（前日実施）であり、まだ履歴に記録されていない場合のみ追加
+                if (
+                    result_dict.get('day') == self.info.day - 1
+                    and not any(r.get('day') == result_dict.get('day') for r in self.divine_results_history)
+                ):
+                    self.divine_results_history.append(result_dict)
+            
+            # --- 霊媒結果の保存（同様のJudgeオブジェクト構造を想定） ---
+            current_medium_result = getattr(self.info, 'medium_result', None)
+            
+            if current_medium_result is not None and hasattr(current_medium_result, 'day'):
+                result_dict = {
+                    'day': getattr(current_medium_result, 'day', None),
+                    'agent': getattr(current_medium_result, 'agent', None),
+                    'target': getattr(current_medium_result, 'target', '不明'),
+                    'result': getattr(getattr(current_medium_result, 'result', '不明'), 'name', str(getattr(current_medium_result, 'result', '不明'))),
+                }
+                
+                if (
+                    result_dict.get('day') == self.info.day - 1
+                    and not any(r.get('day') == result_dict.get('day') for r in self.medium_results_history)
+                ):
+                    self.medium_results_history.append(result_dict)
+        # -----------------------------------------------------------
+
         self.agent_logger.logger.debug(packet)
 
     def get_alive_agents(self) -> list[str]:
@@ -218,6 +274,8 @@ class Agent:
 
         ゲーム開始リクエストに対する初期化処理を行う.
         """
+        # ゲーム開始時に０日目の発言フラグをリセット
+        self.has_talked_on_day0 = False
 
     def daily_initialize(self) -> None:
         """Perform processing for daily initialization request.
@@ -243,6 +301,20 @@ class Agent:
         Returns:
             str: Talk message / 発言メッセージ
         """
+        # --- 0日目の発言制限ロジック (2ターン目以降「Over」) ---
+        # self.infoが存在し、かつ0日目の場合
+        if self.info and self.info.day == 0:
+            if not self.has_talked_on_day0:
+                # 0日目・初回の発言は許可し、フラグを立てる
+                self.has_talked_on_day0 = True
+                # LLMの発言生成ロジックへ
+            else:
+                # 0日目・2回目以降の発言はOverを返し、その日の発言を終了
+                self.agent_logger.logger.info("Day 0, subsequent talk requested. Returning Over.")
+                return "Over" # その日の発言フェーズを終了するメッセージ
+        # --- 0日目の発言制限ロジック ---
+
+
         # --- OpenAI APIを呼び出すロジック ---
         if self.openai_client and self.info: # self.info (ゲーム情報) がセットされているか確認
             llm_response = self._call_openai_api()
@@ -360,7 +432,7 @@ class Agent:
             game_state_summary = self._summarize_game_state()
             formatted_history = self._format_talk_history()
             
-            # ★M3/M2の結果をUser Promptのコンテキストとして追加（検証対応）★
+            # M3/M2の結果をUser Promptのコンテキストとして追加
             strategy_context = ""
             
             # M3またはM2のプランが存在する場合のみコンテキストを生成する
@@ -410,53 +482,58 @@ class Agent:
                 return self.info.agent
             # 取得できない場合は、初期化時のエージェント名（コネクタID）をフォールバックとして使用
             return self.agent_name
-    
+
+
     def _get_role_knowledge(self) -> str:
-            """役職ごとの知っている情報を取得する。"""
-            if not self.info:
-                return "初期情報なし。"
+        """役職ごとの知っている情報を取得する。（履歴リストを参照するように修正）"""
+        if not self.info:
+            return "初期情報なし。"
 
-            match self.role:
-                case Role.WEREWOLF:
-                    wolf_list = getattr(self.info, 'werewolf_agent_list', [])
-                    if not isinstance(wolf_list, list):
-                        wolf_list = []
-                    wolf_list = [a for a in wolf_list if a != self.agent_name]
-                    return f"人狼仲間: {', '.join(wolf_list)}、勝利条件: 村人陣営の数を人狼陣営の数以下にする。"
+        match self.role:
+            case Role.WEREWOLF:
+                wolf_list = getattr(self.info, 'werewolf_agent_list', [])
+                if not isinstance(wolf_list, list):
+                    wolf_list = []
+                wolf_list = [a for a in wolf_list if a != self.agent_name]
+                return f"人狼仲間: {', '.join(wolf_list)}、勝利条件: 村人陣営の数を人狼陣営の数以下にする。"
+            
+            case Role.SEER:
+                results = []
                 
-                case Role.SEER:
-                    all_divine_results = getattr(self.info, 'divine_result', {})
-                    results = []
-                    if isinstance(all_divine_results, dict):
-                        for day, day_results in all_divine_results.items():
-                            if isinstance(day_results, dict):
-                                for target, role in day_results.items():
-                                    role_name = role.name if hasattr(role, 'name') else str(role)
-                                    results.append(f"Day{day} {target} -> {role_name}")
-                    return f"これまでの占い結果: {', '.join(results) if results else 'まだ占い結果は出ていません。'}。"
+                # 蓄積された履歴リストから結果を取得し整形
+                for result in self.divine_results_history:
+                    day = result.get('day', '?')
+                    target = result.get('target', '不明')
+                    role_str = result.get('result', '不明') 
+                    
+                    results.append(f"Day{day} {target} -> {role_str}")
 
-                case Role.MEDIUM:
-                    all_medium_results = getattr(self.info, 'medium_result', {})
-                    results = []
-                    if isinstance(all_medium_results, dict):
-                        for day, day_results in all_medium_results.items():
-                            if isinstance(day_results, dict):
-                                for target, role in day_results.items():
-                                    role_name = role.name if hasattr(role, 'name') else str(role)
-                                    results.append(f"Day{day} {target} (追放) -> {role_name}")
-                    return f"これまでの霊媒結果: {', '.join(results) if results else 'まだ霊媒結果は出ていません。'}。"
+                return f"これまでの占い結果: {', '.join(results) if results else 'まだ占い結果は出ていません。'}。"
 
-                case Role.BODYGUARD:
-                    guarded_agent = getattr(self.info, 'guarded_agent', 'なし')
-                    if guarded_agent is None:
-                        guarded_agent = 'なし'
-                    return f"護衛結果（前日夜）：{guarded_agent}。"
+            case Role.MEDIUM:
+                results = []
                 
-                case _:
-                    return "特に確定情報はありません。"
+                # 蓄積された履歴リストから結果を取得し整形
+                for result in self.medium_results_history:
+                    day = result.get('day', '?')
+                    target = result.get('target', '不明')
+                    role_str = result.get('result', '不明')
+                    
+                    results.append(f"Day{day} {target} (追放) -> {role_str}")
+                
+                return f"これまでの霊媒結果: {', '.join(results) if results else 'まだ霊媒結果は出ていません。'}。"
 
+            case Role.BODYGUARD:
+                guarded_agent = getattr(self.info, 'guarded_agent', 'なし')
+                if guarded_agent is None:
+                    guarded_agent = 'なし'
+                return f"護衛結果（前日夜）：{guarded_agent}。"
+            
+            case _:
+                return "特に確定情報はありません。"
+            
     def _summarize_game_state(self) -> str:
-        """現在のゲーム状況をサマリーする。（agent_list依存を解消）"""
+        """現在のゲーム状況をサマリーする。"""
         if not self.info: 
             return "ゲーム情報なし。"
         
@@ -474,14 +551,19 @@ class Agent:
             f"あなたの役職の知っていること: {self._get_role_knowledge()}"
         )
 
-    def _format_talk_history(self, limit: int = 10) -> str: # ★修正: limit引数を追加し、デフォルト値を設定★
+    def _format_talk_history(self, limit: int = 10) -> str: # limit引数を追加し、デフォルト値を設定
         """会話履歴を整形する。オプションのlimitで表示件数を制限する。"""
         formatted = []
         
+        # ADD LINE: Day 0の発言を除外した履歴リストを作成
+        # 0日目の発言は論理的情報として利用しない
+        filtered_history = [talk for talk in self.talk_history if talk.day != 0]
+
         # limitに基づいて履歴をスライス
         # デフォルトの10件、または指定された件数（例: M3の1件）に制限される
-        history_to_format = self.talk_history[-limit:] 
-        
+        history_to_format = filtered_history[-limit:]
+
+
         for talk in history_to_format:
             speaker = talk.agent 
             formatted.append(f"D{talk.day} {speaker}: {talk.text}")
@@ -492,7 +574,7 @@ class Agent:
     def _log_strategy_decision(self, m3_plan: dict, m2_strategy: dict, strategy_log: str, final_talk: str, system_prompt: str, user_prompt: str) -> None: # <-- 修正: プロンプト引数を追加
             """決定された戦略、LLMの思考プロセス、および最終発言をJSONLファイルに記録する。"""
             
-            if not self.strategy_log_path: # <-- このチェックで log_dir がNoneの場合のエラーを防ぎます
+            if not self.strategy_log_path: # このチェックで log_dir がNoneの場合のエラーを防ぐ
                 self.agent_logger.logger.warning("Strategy log path is not set. Skipping log decision.")
                 return
 
@@ -507,7 +589,7 @@ class Agent:
                 "m2_strategy": m2_strategy if self.USE_M2_LIE else {},
                 "llm_strategy_log": strategy_log,      # 【発言：】より前のLLMの思考
                 "final_talk": final_talk,              # 最終発言
-                # <-- 追加: プロンプト全体をログに記録
+                # プロンプト全体をログに記録
                 "system_prompt": system_prompt,
                 "user_prompt": user_prompt,
             }
@@ -732,7 +814,7 @@ class Agent:
                                 feedback = reason
                                 continue
                         
-                        # <-- 修正/追加箇所: ログ関数呼び出し
+                        # ログ関数呼び出し
                         self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
                         return talk_content # M1が無効、または最初の試行で矛盾なしの場合
 
@@ -747,7 +829,7 @@ class Agent:
             self.agent_logger.logger.warning("Failed to generate consistent talk after all attempts. Using last generated talk.")
             
             if last_generated_talk:
-                # <-- 修正/追加箇所: 最後に生成されたものをログに記録
+                # 最後に生成されたものをログに記録
                 self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, last_generated_talk, current_system_message, current_user_prompt) 
                 return last_generated_talk
             else:
