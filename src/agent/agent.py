@@ -377,7 +377,6 @@ class Agent:
         """
 
     # 発話生成用のプロンプト生成
-
     def _create_talk_prompt(self, m3_plan: dict, m2_strategy: dict, regeneration_feedback: str = None) -> tuple[str, str]:
             """
             LLMへのシステムメッセージとユーザープロンプトを生成する。
