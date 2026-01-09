@@ -22,6 +22,8 @@ from modules.policy_generator import UtterancePolicyGenerator
 from modules.lie_strategist import LieStrategyModule
 from modules.consistency_checker import LogicalConsistencyChecker
 
+from modules.speech_analyzer import SpeechAnalyzer
+
 from modules.belief_model import BeliefModel 
 
 import json
@@ -102,8 +104,8 @@ class Agent:
         module_settings = self.config.get("custom_modules", {})
         
         self.USE_M3_POLICY = module_settings.get("enable_module_policy", True)
-        self.USE_M2_LIE = module_settings.get("enable_module_lie", False)
-        self.USE_M1_CONSISTENCY = module_settings.get("enable_module_consistency", False)
+        self.USE_M2_LIE = module_settings.get("enable_module_lie", True)
+        self.USE_M1_CONSISTENCY = module_settings.get("enable_module_consistency", True)
         self.MAX_REGENERATION_ATTEMPTS = module_settings.get("max_regeneration_attempts", 2)
 
         # モジュールインスタンスの作成
