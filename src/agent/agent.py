@@ -20,6 +20,7 @@ from openai import OpenAI, APIError
 # --- 新規モジュールのインポート ---
 from modules.speech_analyzer import SpeechAnalyzer
 from modules.belief_model import BeliefModel 
+from modules.action_decider import ActionModule
 from modules.policy_generator import UtterancePolicyGenerator
 from modules.lie_strategist import LieStrategyModule
 from modules.consistency_checker import LogicalConsistencyChecker
@@ -116,6 +117,10 @@ class Agent:
 
         # --- 信念モデルの初期化 ---
         self.BeliefModel = BeliefModel(self.agent_logger) 
+        
+        # --- 行動決定モジュールの初期化 ---
+        self.ActionModule = ActionModule(self.agent_logger)
+
         # ---------------------------------------------
 
         # 0日目に発言済みかどうかのフラグ
@@ -363,13 +368,17 @@ class Agent:
         Returns:
             str: Agent name to divine / 占い対象のエージェント名
         """
-
         if self.BeliefModel and self.info:
-            target = self.BeliefModel.decide_target_for_divine(self.info.status_map) 
-            if target:
-                return target
-            
-        return random.choice(self.get_alive_agents())  # noqa: S311
+            # 過去の占い対象リスト
+            history = [d['target'] for d in self.divine_results_history]
+            return self.ActionModule.decide_divine_target(
+                self.get_alive_agents(), 
+                self.BeliefModel.role_probabilities, 
+                self.agent_name, 
+                history
+            )
+        return random.choice(self.get_alive_agents())
+ 
 
     def guard(self) -> str:
         """Return response to guard request.
@@ -380,7 +389,8 @@ class Agent:
             str: Agent name to guard / 護衛対象のエージェント名
         """
         return random.choice(self.get_alive_agents())  # noqa: S311
-
+    
+    
     def vote(self) -> str:
         """Return response to vote request.
 
@@ -388,14 +398,15 @@ class Agent:
 
         Returns:
             str: Agent name to vote / 投票対象のエージェント名
-        """
-
+        """   
         if self.BeliefModel and self.info:
-            target = self.BeliefModel.decide_target_for_vote(self.info.status_map) 
-            if target:
-                return target
-            
-        return random.choice(self.get_alive_agents())  # noqa: S311
+            return self.ActionModule.decide_vote_target(
+                self.get_alive_agents(), 
+                self.BeliefModel.role_probabilities, 
+                self.role, 
+                self.agent_name
+            )
+        return random.choice(self.get_alive_agents())
 
     def attack(self) -> str:
         """Return response to attack request.
@@ -405,13 +416,13 @@ class Agent:
         Returns:
             str: Agent name to attack / 襲撃対象のエージェント名
         """
-
         if self.BeliefModel and self.info:
-            target = self.BeliefModel.decide_target_for_attack(self.info.status_map) 
-            if target:
-                return target
-            
-        return random.choice(self.get_alive_agents())  # noqa: S311
+            return self.ActionModule.decide_attack_target(
+                self.get_alive_agents(), 
+                self.BeliefModel.role_probabilities, 
+                self.agent_name
+            )
+        return random.choice(self.get_alive_agents())
 
     def finish(self) -> None:
         """Perform processing for game finish request.
@@ -783,10 +794,9 @@ class Agent:
             analyzed_talks = analyzer.analyze_latest_talks(self.talk_history, limit=5)
             
             # 役職推定 (BeliefModel) の更新
-            # 分析済みのデータを使って信念モデルを更新
+            # 対話要約、論理整合性、プレイヤー関係性を加味して役職確率を計算
             if self.BeliefModel:
-                # BeliefModelのupdateメソッドが analyzed_talks を受け取れるように後述の修正が必要
-                self.BeliefModel.update_with_analyzed_data(self.info, analyzed_talks, self.role)
+                self.BeliefModel.update_from_analyzed_data(self.info, analyzed_talks)
 
             # 【M4/M5の事前戦略決定】
             # モジュールが有効な場合はLLMコールを行い、無効な場合は空の辞書（{}）を取得する。
