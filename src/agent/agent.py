@@ -18,13 +18,12 @@ import os
 from openai import OpenAI, APIError
 
 # --- 新規モジュールのインポート ---
+from modules.speech_analyzer import SpeechAnalyzer
+from modules.belief_model import BeliefModel 
 from modules.policy_generator import UtterancePolicyGenerator
 from modules.lie_strategist import LieStrategyModule
 from modules.consistency_checker import LogicalConsistencyChecker
 
-from modules.speech_analyzer import SpeechAnalyzer
-
-from modules.belief_model import BeliefModel 
 
 import json
 
@@ -103,16 +102,15 @@ class Agent:
         # --- カスタムモジュールの設定と初期化 ---
         module_settings = self.config.get("custom_modules", {})
         
-        self.USE_M3_POLICY = module_settings.get("enable_module_policy", True)
-        self.USE_M2_LIE = module_settings.get("enable_module_lie", True)
-        self.USE_M1_CONSISTENCY = module_settings.get("enable_module_consistency", True)
+        self.USE_M4_POLICY = module_settings.get("enable_module_policy", True)
+        self.USE_M5_LIE = module_settings.get("enable_module_lie", True) #M5はM4に依存するため、M4有効時のみ意味を持つ
+        self.USE_M7_CONSISTENCY = module_settings.get("enable_module_consistency", True)
         self.MAX_REGENERATION_ATTEMPTS = module_settings.get("max_regeneration_attempts", 2)
 
         # モジュールインスタンスの作成
-        self.M3_Policy = UtterancePolicyGenerator(self.agent_logger) if self.USE_M3_POLICY else None
-        # M2はM3を前提とするが、ここでは独立したフラグで制御
-        self.M2_Lie = LieStrategyModule(self.agent_logger) if self.USE_M2_LIE else None
-        self.M1_Consistency = LogicalConsistencyChecker(self.agent_logger, self.openai_client) if self.USE_M1_CONSISTENCY and self.openai_client else None
+        self.M4_Policy = UtterancePolicyGenerator(self.agent_logger) if self.USE_M4_POLICY else None
+        self.M5_Lie = LieStrategyModule(self.agent_logger) if self.USE_M5_LIE else None
+        self.M7_Consistency = LogicalConsistencyChecker(self.agent_logger, self.openai_client) if self.USE_M7_CONSISTENCY and self.openai_client else None
         
         # ---------------------------------------------
 
@@ -422,13 +420,13 @@ class Agent:
         """
 
     # 発話生成用のプロンプト生成
-    def _create_talk_prompt(self, m3_plan: dict, m2_strategy: dict, regeneration_feedback: str = None) -> tuple[str, str]:
+    def _create_talk_prompt(self, m4_plan: dict, m5_strategy: dict, regeneration_feedback: str = None, analyzed_talks: list = None) -> tuple[str, str]:
             """
             LLMへのシステムメッセージとユーザープロンプトを生成する。
-            M3とM2の指示を統合し、M1からの矛盾修正指示（regeneration_feedback）を組み込む。
+            M4とM5の指示を統合し、M7からの矛盾修正指示（regeneration_feedback）を組み込む。
             
             Args:
-                regeneration_feedback (str): M1からの矛盾修正指示（ある場合、NoneでOK）
+                regeneration_feedback (str): M7からの矛盾修正指示（ある場合、NoneでOK）
             
             Returns:
                 tuple[str, str]: (system_message, user_prompt)
@@ -437,20 +435,32 @@ class Agent:
                 # ゲーム情報がない場合のフォールバック
                 return "system_message", f"ゲーム情報がありません。ランダムな発言をします。エージェント名: {self.agent_name}" 
 
-            # ----------------------------------------------------
-            # 1. 基本情報の取得
-            # ----------------------------------------------------
+            # 基本情報の取得
             agent_display_name = self._get_agent_display_name()
-            
-            # ----------------------------------------------------
-            # 2. システムメッセージ (System Message) の構築
-            # ----------------------------------------------------
-            system_message = (
-                f"目的は役職の勝利条件を達成することです。\n"
-                f"**【重要】発言は**`【発言：】`**の直後に記述し、その内容は**厳密に120文字以内**の簡潔な日本語で、あなたの役職が疑われないように行ってください。\n" 
-                f"**最終的な出力の形式を厳守してください。発言内容の直前には必ず**`【発言：】`**というラベルを付けてください。**`【発言：】`**より前の思考プロセスは、ゲーム内で発言されません。あなたの**最終的な発言**は、`【発言：】`ラベルの直後の内容のみが採用されます。\n"  
+
+            # ゲームルールの定義
+            game_rules = (
+                "## 人狼ゲーム基本ルール設定\n"
+                "- **参加人数**: 5名（村人2、占い師1、人狼1、狂人1）\n"
+                "- **勝利条件**:\n"
+                "  - 村人陣営: すべての人狼を追放する。\n"
+                "  - 人狼陣営: 人間の生存者数が人狼の生存者数以下になる。\n"
+                "- **役職能力**:\n"
+                "  - 占い師: 毎晩1名の陣営（人間か人狼か）を知ることができる。\n"
+                "  - 人狼: 毎晩1名を襲撃して除外できる。仲間の狂人は知らない。\n"
+                "  - 狂人: 特殊能力はないが人狼陣営。占い結果は「人間」と出る。\n"
             )
             
+            
+            # System Messageの構築
+            system_message = (
+                f"あなたは人狼ゲームのプレイヤーです。以下の基本ルールを確認してください。\n\n"
+                f"{game_rules}\n\n"  
+                f"目的は役職の勝利条件を達成することです。\n"
+                f"【重要】発言は`【発言：】`の直後に記述し、その内容は厳密に120文字以内の簡潔な日本語で、あなたの役職が疑われないように行ってください。\n" 
+                f"最終的な出力の形式を厳守してください。発言内容の直前には必ず`【発言：】`というラベルを付けてください。`【発言：】`より前の思考プロセスは、ゲーム内で発言されません。あなたの最終的な発言は、`【発言：】`ラベルの直後の内容のみが採用されます。\n"  
+            )
+
             # --- 役職ごとの具体的な戦略的指示---
             match self.role:
                 case Role.WEREWOLF:
@@ -462,63 +472,63 @@ class Agent:
                 case _: # VILLAGER, BODYGUARD, MEDIUM, etc.
                     system_message += "あなたは村人陣営です。生存者の発言を注意深く分析し、論理的推論に基づき怪しいプレイヤーを指摘するか、他のプレイヤーと協力し、村人陣営の勝利を目指してください。\n"
 
-            # --- M1: 論理矛盾修正指示の組み込み（再生成ループ時のみ） ---
+            # --- M7: 論理矛盾修正指示の組み込み（再生成ループ時のみ） ---
             if regeneration_feedback:
-                system_message += f"\n\n**【論理矛盾の修正指示】**\n"
-                system_message += f"あなたの前回の発言は以下の点で論理的に矛盾していると判定されました。**この修正指示を完全に反映し、矛盾を解消した発言を再生成してください。**\n"
+                system_message += f"\n\n【論理矛盾の修正指示】\n"
+                system_message += f"あなたの前回の発言は以下の点で論理的に矛盾していると判定されました。この修正指示を完全に反映し、矛盾を解消した発言を再生成してください。\n"
                 system_message += f"修正理由: {regeneration_feedback}\n"
-                self.agent_logger.logger.warning("M1 feedback integrated into system prompt for regeneration.")
+                self.agent_logger.logger.warning("M7 feedback integrated into system prompt for regeneration.")
 
-            # ----------------------------------------------------
-            # 3. ユーザープロンプト (User Prompt) の構築
-            # ----------------------------------------------------
-            
+
+            # User Promptの構築            
             game_state_summary = self._summarize_game_state()
-            formatted_history = self._format_talk_history()
+            summary_str = self._format_analyzed_summary(analyzed_talks, include_target=False)
             
-            # M3/M2の結果をUser Promptのコンテキストとして追加
+            # M4/M5の結果をUser Promptのコンテキストとして追加
             strategy_context = ""
             
-            # M3またはM2のプランが存在する場合のみコンテキストを生成する
-            if m3_plan or m2_strategy:
-                # M3情報
-                m3_core_goal = m3_plan.get('core_goal', '情報収集に徹する')
-                m3_response_policy = m3_plan.get('response_policy', 'PRIORITIZE_CORE')
+            # M4またはM5のプランが存在する場合のみコンテキストを生成する
+            if m4_plan or m5_strategy:
+                # M4情報
+                m4_core_goal = m4_plan.get('core_goal', '情報収集に徹する')
+                m4_response_policy = m4_plan.get('response_policy', 'PRIORITIZE_CORE')
                 
-                # M2情報 (M2が無効で空のdictの場合、extended_goalはcore_goalと同じになる)
-                m2_extended_goal = m2_strategy.get('extended_goal', m3_core_goal)
-                m2_lie_used = 'はい' if m2_strategy.get('lie_used') else 'いいえ'
+                # M5情報 (M5が無効で空のdictの場合、extended_goalはcore_goalと同じになる)
+                m5_extended_goal = m5_strategy.get('extended_goal', m4_core_goal)
+                m5_lie_used = 'はい' if m5_strategy.get('lie_used') else 'いいえ'
 
                 # モジュール使用時のみ表示されるコンテキスト
                 strategy_context = (
                     "\n----------------------------------------------------\n"
-                    "**【事前決定された戦略的目標と方針】**\n"
-                    f"**1. 主張の核 (Core Goal):** {m3_core_goal}\n"
-                    f"**2. 議論への対応方針 (Response Policy):** {m3_response_policy} (RESPOND_CRITICALLYの場合、直前の発言への応答を最優先してください)\n"
-                    f"**3. 嘘戦略の使用:** {m2_lie_used}\n"
-                    f"**4. 最終的な行動目標:** {m2_extended_goal} (これがあなたの発言の目標です)\n"
+                    "【事前決定された戦略的目標と方針】\n"
+                    f"1. 主張の核 (Core Goal): {m4_core_goal}\n"
+                    f"2. 議論への対応方針 (Response Policy): {m4_response_policy} (RESPOND_CRITICALLYの場合、直前の発言への応答を最優先してください)\n"
+                    f"3. 嘘戦略の使用: {m5_lie_used}\n"
+                    f"4. 最終的な行動目標: {m5_extended_goal} (これがあなたの発言の目標です)\n"
                     "----------------------------------------------------\n"
                 )
 
             user_prompt = f"""
-                あなたは {agent_display_name} です。
+                あなたは {agent_display_name} です。役職: {self.role.name}
 
-                【現在のゲーム情報】
+                【現在のゲーム状況】
                 {game_state_summary}
 
+                【対話の要約 (Speech Analysis)】
+                {summary_str}
+
+                【決定された方針と戦略】
                 {strategy_context}
 
-                【これまでの会話履歴（直近10件）】
-                {formatted_history}
-
-                【あなたの発言決定プロセス】
-                情報を踏まえて、目標達成のために発言内容を120字以内で決定してください。
+                上記の方針・戦略を完遂するために、120文字以内で発言してください。
+                【発言：】
             """
+            
             return system_message, user_prompt
+    
     # ----------------------------------------------------------------------
     # Agent ID と Agent Name のマッピングに関するヘルパー関数
     # ----------------------------------------------------------------------
-
     def _get_agent_display_name(self) -> str:
             """現在のエージェントの表示名（シオン、ベンジャミンなど）を取得する。"""
             # Infoパケットの agent フィールド（表示名）を直接利用
@@ -539,7 +549,7 @@ class Agent:
                 if not isinstance(wolf_list, list):
                     wolf_list = []
                 wolf_list = [a for a in wolf_list if a != self.agent_name]
-                return f"人狼仲間: {', '.join(wolf_list)}、勝利条件: 村人陣営の数を人狼陣営の数以下にする。"
+                return f"人狼仲間: {', '.join(wolf_list)}"
             
             case Role.SEER:
                 results = []
@@ -601,42 +611,42 @@ class Agent:
             f"{belief_summary}" # LLMへのプロンプトに含める
         )
 
-    def _format_talk_history(self, limit: int = 10) -> str: # limit引数を追加し、デフォルト値を設定
-        """会話履歴を整形する。オプションのlimitで表示件数を制限する。"""
-        formatted = []
-        
-        # ADD LINE: Day 0の発言を除外した履歴リストを作成
-        # 0日目の発言は論理的情報として利用しない
-        filtered_history = [talk for talk in self.talk_history if talk.day != 0]
-
-        # limitに基づいて履歴をスライス
-        # デフォルトの10件、または指定された件数（例: M3の1件）に制限される
-        history_to_format = filtered_history[-limit:]
-
-
-        for talk in history_to_format:
-            speaker = talk.agent 
-            formatted.append(f"D{talk.day} {speaker}: {talk.text}")
+    def _format_analyzed_summary(self, analyzed_talks: list[dict], include_target: bool = False) -> str:
+            """分析された発話をプロンプト用に整形する。"""
+            if not analyzed_talks:
+                return "直近の重要な発話はありません。"
             
-        return "\n".join(formatted) if formatted else "まだ会話はありません。"
-    
-    # ----------------------------------------------------------------------
-    def _log_strategy_decision(self, m3_plan: dict, m2_strategy: dict, strategy_log: str, final_talk: str, system_prompt: str, user_prompt: str) -> None: # <-- 修正: プロンプト引数を追加
+            formatted_lines = []
+            for t in analyzed_talks:
+                agent = t.get('agent', '不明')
+                target = t.get('target', 'NONE')
+                intent = t.get('intent', '不明')
+                summary = t.get('summary', '')
+                
+                if include_target and target != 'NONE':
+                    # 方針決定用：誰が誰に言及したかを明示
+                    line = f"- {agent} -> {target}: {summary} (意図: {intent})"
+                else:
+                    line = f"- {agent}: {summary} (意図: {intent})"
+                formatted_lines.append(line)
+            return "\n".join(formatted_lines)
+
+    def _log_strategy_decision(self, m4_plan: dict, m5_strategy: dict, strategy_log: str, final_talk: str, system_prompt: str, user_prompt: str) -> None: # <-- 修正: プロンプト引数を追加
             """決定された戦略、LLMの思考プロセス、および最終発言をJSONLファイルに記録する。"""
             
             if not self.strategy_log_path: # このチェックで log_dir がNoneの場合のエラーを防ぐ
                 self.agent_logger.logger.warning("Strategy log path is not set. Skipping log decision.")
                 return
 
-            # M3/M2の結果は、モジュールが無効の場合に空の辞書 {} となるため、適切にログに記録する。
+            # M4/M5の結果は、モジュールが無効の場合に空の辞書 {} となるため、適切にログに記録する。
             
             log_entry = {
                 "day": self.info.day if self.info else 0,
                 "role": self.role.name,
-                "is_m3_used": bool(self.USE_M3_POLICY),
-                "is_m2_used": bool(self.USE_M2_LIE),
-                "m3_plan": m3_plan if self.USE_M3_POLICY else {},
-                "m2_strategy": m2_strategy if self.USE_M2_LIE else {},
+                "is_m4_used": bool(self.USE_M4_POLICY),
+                "is_m5_used": bool(self.USE_M5_LIE),
+                "m4_plan": m4_plan if self.USE_M4_POLICY else {},
+                "m5_strategy": m5_strategy if self.USE_M5_LIE else {},
                 "llm_strategy_log": strategy_log,      # 【発言：】より前のLLMの思考
                 "final_talk": final_talk,              # 最終発言
                 # プロンプト全体をログに記録
@@ -671,7 +681,7 @@ class Agent:
 
     def _query_llm_for_strategy(self, prompt_context: str, fallback_data: dict) -> dict:
         """
-        戦略決定（M3/M2）専用のLLMコールを行う。
+        戦略決定（M4/M5）専用のLLMコールを行う。
         安定したJSON出力を得るため、専用のSystem Messageと低温度設定を使用する。
         """
         if not self.openai_client:
@@ -681,7 +691,7 @@ class Agent:
         # JSON出力を強制するためのSystem Message
         system_msg = (
             "あなたは与えられた情報に基づき、戦略的な計画をJSON形式で出力する専門のAIです。\n"
-            "思考プロセス、説明、Markdown形式（```json```）など、**JSONオブジェクト以外の一切のテキスト**は含めないでください。**厳密にJSONオブジェクトのみ**を出力してください。"
+            "思考プロセス、説明、Markdown形式（```json```）など、JSONオブジェクト以外の一切のテキストは含めないでください。厳密にJSONオブジェクトのみを出力してください。"
         )
         
         try:
@@ -702,53 +712,60 @@ class Agent:
             return fallback_data
 
 
-    def _get_m3_plan_from_llm(self) -> dict:
-        """M3: 主張の核と応答方針をLLMに問い合わせて決定する。（モジュール不使用時は空の辞書を返す）"""
+    def _get_m4_plan_from_llm(self,analyzed_talks: list = None) -> dict:
+        """M4: 主張の核と応答方針をLLMに問い合わせて決定する。（モジュール不使用時は空の辞書を返す）"""
         fallback_data = {"core_goal": "状況を注意深く観察する", "response_policy": "PRIORITIZE_CORE", "response_target_id": "NONE"}
+        summary_str = self._format_analyzed_summary(analyzed_talks, include_target=True)
         
-        if not self.USE_M3_POLICY or not self.M3_Policy:
-            self.agent_logger.logger.info("M3 Policy Generator is disabled. Using default plan.")
+        if not self.USE_M4_POLICY or not self.M4_Policy:
+            self.agent_logger.logger.info("M4 Policy Generator is disabled. Using default plan.")
             return {} # 空の辞書を返し、_create_talk_promptでデフォルト処理される
 
-        self.agent_logger.logger.debug("M3: Planning LLM call initiated.")
+        self.agent_logger.logger.debug("M4: Planning LLM call initiated.")
         
-        # M3専用のプロンプトを構築
-        m3_instructions = self.M3_Policy.get_planning_prompt_instructions(self.role)
+        # M4専用のプロンプトを構築
+        m4_instructions = self.M4_Policy.get_planning_prompt_instructions(self.role)
         prompt_context = f"""
-        {m3_instructions}
+        {m4_instructions}
 
         【現在のゲーム情報】
         {self._summarize_game_state()}
-        【直前の発話】
-        {self._format_talk_history(limit=1)}
+        
+        【直近の会話要約】
+        {summary_str}
         """
         
         return self._query_llm_for_strategy(prompt_context, fallback_data)
 
 
-    #### B. M2: 嘘戦略の決定
-    # M2_Lie は LieStrategyModule のインスタンスを想定
+    #### B. M5: 嘘戦略の決定
+    # M5_Lie は LieStrategyModule のインスタンスを想定
 
-    def _get_m2_strategy_from_llm(self, m3_plan: dict) -> dict:
-        """M2: M3の計画に基づき、嘘戦略の有無を決定する。（モジュール不使用時は空の辞書を返す）"""
+    def _get_m5_strategy_from_llm(self, m4_plan: dict, analyzed_talks: list = None) -> dict:
+        """M5: M4の計画に基づき、嘘戦略の有無を決定する。（モジュール不使用時は空の辞書を返す）"""
         
-        # M2モジュール不使用の場合
-        if not self.USE_M2_LIE or not self.M2_Lie:
+        # M5モジュール不使用の場合
+        if not self.USE_M5_LIE or not self.M5_Lie:
             return {}
         
-        core_goal = m3_plan.get('core_goal', '情報収集に徹する')
+        core_goal = m4_plan.get('core_goal', '情報収集に徹する')
         fallback_data = {"lie_used": False, "extended_goal": core_goal}
+        summary_str = self._format_analyzed_summary(analyzed_talks, include_target=False)
 
-        self.agent_logger.logger.debug("M2: Lie strategy LLM call initiated.")
+        self.agent_logger.logger.debug("M5: Lie strategy LLM call initiated.")
         
-        # M2専用のプロンプトを構築
-        m2_instructions = self.M2_Lie.get_strategy_decision_instructions(self.role)
+        # M5専用のプロンプトを構築
+        m5_instructions = self.M5_Lie.get_strategy_decision_instructions(self.role)
         prompt_context = f"""
-        {m2_instructions}
+        {m5_instructions}
 
         【あなたの役職情報】
         役職: {self.role.name} / 知っている情報: {self._get_role_knowledge()}
-        【M3決定された主張の核】
+
+        【直近の会話要約】
+        {summary_str}
+
+        【主張の核】
         {core_goal}
         """
         
@@ -758,14 +775,25 @@ class Agent:
             """OpenAI APIを呼び出し、モジュールパイプラインに従って応答を取得・解析する。"""
             if not self.openai_client:
                 return None
+        
+            # 発話分析 (SpeechAnalyzer)
+            # 直近の発言を分析し、構造化データ(要約)を取得
+            # analyzerを初期化（__init__で保持するか、ここで生成）
+            analyzer = SpeechAnalyzer(self.openai_client)
+            analyzed_talks = analyzer.analyze_latest_talks(self.talk_history, limit=5)
             
-            # 【M3/M2の事前戦略決定】
-            # -------------------------------------------------------------------
-            # モジュールが有効な場合はLLMコールを行い、無効な場合は空の辞書（{}）を取得する。
-            m3_plan = self._get_m3_plan_from_llm() 
-            m2_strategy = self._get_m2_strategy_from_llm(m3_plan)
+            # 役職推定 (BeliefModel) の更新
+            # 分析済みのデータを使って信念モデルを更新
+            if self.BeliefModel:
+                # BeliefModelのupdateメソッドが analyzed_talks を受け取れるように後述の修正が必要
+                self.BeliefModel.update_with_analyzed_data(self.info, analyzed_talks, self.role)
 
-            # 【M1: 論理的一貫性判定・修正のためのループ】
+            # 【M4/M5の事前戦略決定】
+            # モジュールが有効な場合はLLMコールを行い、無効な場合は空の辞書（{}）を取得する。
+            m4_plan = self._get_m4_plan_from_llm(analyzed_talks) 
+            m5_strategy = self._get_m5_strategy_from_llm(m4_plan,analyzed_talks)
+
+            # 【M7: 論理的一貫性判定・修正のためのループ】
             feedback = None
             last_generated_talk = None
             current_system_message = ""
@@ -773,17 +801,17 @@ class Agent:
             final_strategy_log = "" 
             
             for attempt in range(self.MAX_REGENERATION_ATTEMPTS):
-                # 1. LLMへのプロンプト生成 (M3/M2の指示を統合、またはM1のフィードバックを組み込む)
+                # 1. LLMへのプロンプト生成 (M4/M5の指示を統合、またはM7のフィードバックを組み込む)
                 system_message, user_prompt = self._create_talk_prompt(
-                            m3_plan=m3_plan, 
-                            m2_strategy=m2_strategy, 
+                            m4_plan=m4_plan, 
+                            m5_strategy=m5_strategy, 
                             regeneration_feedback=feedback
                         )
                 current_system_message = system_message 
                 current_user_prompt = user_prompt
 
                 try:
-                    # 2. LLM APIコール (仮想発話の生成)
+                    # LLM APIコール (仮想発話の生成)
                     response = self.openai_client.chat.completions.create(
                         model=LLM_MODEL,
                         messages=[
@@ -797,7 +825,7 @@ class Agent:
                     talk_content_full = response.choices[0].message.content.strip()
                     talk_content = None
                     
-                    # 3. 応答の解析と抽出（「発言：」のラベルを基に）
+                    # 応答の解析と抽出（「発言：」のラベルを基に）
                     if "【発言：】" in talk_content_full:
                         parts = talk_content_full.split("【発言：】", 1)
                         strategy_log = parts[0].strip()
@@ -812,10 +840,10 @@ class Agent:
                         self.agent_logger.logger.info(f"Attempt {attempt+1}: LLM Strategy (Internal COG): {strategy_log[:50]}...")
                         self.agent_logger.logger.info(f"Attempt {attempt+1}: LLM Response (Virtual Talk): {talk_content}")
 
-                        # 4. M1: 論理的一貫性チェックの実行
+                        # M7: 論理的一貫性チェックの実行
                         # モジュールが有効化されている場合、チェックを行う
-                        if self.USE_M1_CONSISTENCY and self.M1_Consistency:
-                            is_consistent, reason = self.M1_Consistency.check(
+                        if self.USE_M7_CONSISTENCY and self.M7_Consistency:
+                            is_consistent, reason = self.M7_Consistency.check(
                                 game_info=self.info, 
                                 talk_history=self.talk_history, 
                                 virtual_talk=talk_content, 
@@ -824,20 +852,20 @@ class Agent:
                             
                             if is_consistent:
                                 # 矛盾なしと判定されたら、ループを終了して発言を返す
-                                self.agent_logger.logger.info("M1: Logical consistency check passed. Talk decided.")
+                                self.agent_logger.logger.info("M7: Logical consistency check passed. Talk decided.")
                                 # <-- 修正/追加箇所: ログ関数呼び出し
-                                self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
+                                self._log_strategy_decision(m4_plan, m5_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
                                 return talk_content
                             else:
                                 # 矛盾ありと判定されたら、feedbackを更新し、再生成へ
-                                self.agent_logger.logger.warning(f"M1: Logical inconsistency detected (Attempt {attempt+1}/{self.MAX_REGENERATION_ATTEMPTS}). Retrying...")
-                                feedback = reason # M1からの修正指示をフィードバックとして設定
+                                self.agent_logger.logger.warning(f"M7: Logical inconsistency detected (Attempt {attempt+1}/{self.MAX_REGENERATION_ATTEMPTS}). Retrying...")
+                                feedback = reason # M7からの修正指示をフィードバックとして設定
                                 continue # 次のループへ
                         else:
-                            # M1が無効の場合、チェックせずに発言を返す
-                            self.agent_logger.logger.info("M1: Consistency check skipped (Module disabled). Talk decided.")
+                            # M7が無効の場合、チェックせずに発言を返す
+                            self.agent_logger.logger.info("M7: Consistency check skipped (Module disabled). Talk decided.")
                             # <-- 修正/追加箇所: ログ関数呼び出し
-                            self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
+                            self._log_strategy_decision(m4_plan, m5_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
                             return talk_content
 
                     # テンプレートに従わなかった場合 (既存コードのフォールバック)
@@ -848,9 +876,9 @@ class Agent:
                         last_generated_talk = talk_content
                         final_strategy_log = "" # テンプレート外の場合は思考ログなし
 
-                        # テンプレート外でもM1はチェックすべき
-                        if self.USE_M1_CONSISTENCY and self.M1_Consistency:
-                            is_consistent, reason = self.M1_Consistency.check(
+                        # テンプレート外でもM7はチェックすべき
+                        if self.USE_M7_CONSISTENCY and self.M7_Consistency:
+                            is_consistent, reason = self.M7_Consistency.check(
                                 game_info=self.info, 
                                 talk_history=self.talk_history, 
                                 virtual_talk=talk_content, 
@@ -858,15 +886,15 @@ class Agent:
                             )
                             if is_consistent:
                                 # <-- 修正/追加箇所: ログ関数呼び出し
-                                self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
+                                self._log_strategy_decision(m4_plan, m5_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
                                 return talk_content
                             else:
                                 feedback = reason
                                 continue
                         
                         # ログ関数呼び出し
-                        self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
-                        return talk_content # M1が無効、または最初の試行で矛盾なしの場合
+                        self._log_strategy_decision(m4_plan, m5_strategy, final_strategy_log, talk_content, current_system_message, current_user_prompt) 
+                        return talk_content # M7が無効、または最初の試行で矛盾なしの場合
 
                 except APIError as e:
                     self.agent_logger.logger.error("OpenAI API Error: %s", e)
@@ -880,7 +908,7 @@ class Agent:
             
             if last_generated_talk:
                 # 最後に生成されたものをログに記録
-                self._log_strategy_decision(m3_plan, m2_strategy, final_strategy_log, last_generated_talk, current_system_message, current_user_prompt) 
+                self._log_strategy_decision(m4_plan, m5_strategy, final_strategy_log, last_generated_talk, current_system_message, current_user_prompt) 
                 return last_generated_talk
             else:
                 self.agent_logger.logger.warning("No talk was generated at all. Falling back to random choice.")
