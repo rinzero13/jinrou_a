@@ -1,0 +1,60 @@
+{
+  "scenario_id": "SC-01-SEER-START",
+  "title": "初日・真占い師の白出し",
+  "context": {
+    "day": 1,
+    "turn": 5,
+    "my_id": "02",
+    "my_role": "SEER",
+    "alive_players": ["01", "02", "03", "04", "05"],
+    "raw_talks": [
+      {"agent": "Agent[03]", "text": "よろしくお願いします。少し様子を見ます。"},
+      {"agent": "Agent[04]", "text": "了解しました。まずは役職者の名乗りを待ちましょう。"},
+      {"agent": "Agent[05]", "text": "そうですね。どなたか占い師の方はいらっしゃいますか？"},
+      {"agent": "Agent[02]", "text": "とりあえず、初日なので私はまだ発言を控えます。"},
+      {"agent": "Agent[01]", "text": "02さん、先ほどから静かですが、何か意見はありますか？"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[03]", "target": "NONE", "fact": "NONE", "intent": "PASSIVE", "summary": "03が様子を伺っている"},
+      {"agent": "Agent[04]", "target": "NONE", "fact": "NONE", "intent": "AGREE", "summary": "04が議論の進行に同意"},
+      {"agent": "Agent[05]", "target": "NONE", "fact": "NONE", "intent": "INQUIRY", "summary": "05が役職者の有無を問う"},
+      {"agent": "Agent[02]", "target": "NONE", "fact": "NONE", "intent": "PASSIVE", "summary": "自分(02)はまだ沈黙している"},
+      {"agent": "Agent[01]", "target": "Agent[02]", "fact": "NONE", "intent": "INQUIRY", "summary": "01が自分(02)に意見を求める"}
+    ],
+    "role_probabilities": {
+      "01": {"VILLAGER": 0.4, "WEREWOLF": 0.3, "POSSESSED": 0.3},
+      "02": {"SEER": 1.0},
+      "03": {"VILLAGER": 0.4, "WEREWOLF": 0.3, "POSSESSED": 0.3},
+      "04": {"VILLAGER": 0.4, "WEREWOLF": 0.3, "POSSESSED": 0.3},
+      "05": {"VILLAGER": 0.4, "WEREWOLF": 0.3, "POSSESSED": 0.3}
+    },
+    "divined_result": {"target": "01", "result": "HUMAN"}
+  },
+  "modules": {
+    "M4_UtterancePolicy": {
+      "output": {
+        "classification_type": "CO",
+        "core_goal": "真占いとしてCOし、01の白判定を共有して村の信頼を得る",
+        "response_policy": "PRIORITIZE_CORE",
+        "response_target_id": "NONE"
+      }
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": false,
+        "lie_type": "None",
+        "risk_rating": "None",
+        "extended_goal": "真占いとしてCOし、01の白判定を共有して村の信頼を得る"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "output": "占い師です。昨夜、01さんを占って白（人間）でした。"
+    },
+    "M7_ConsistencyCheck": {
+      "output": {
+        "is_consistent": true,
+        "reasoning": "自身の役職(SEER)、占い結果(01:HUMAN)、およびM4の方針(CO)と完全に合致しており、直前のAgent[01]からの問いかけに対する応答としても適切である。"
+      }
+    }
+  }
+}

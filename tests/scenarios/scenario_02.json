@@ -1,0 +1,59 @@
+{
+  "scenario_id": "SC-02-WOLF-STEALTH-FINAL",
+  "title": "潜伏人狼の同調",
+  "context": {
+    "day": 1,
+    "turn": 5,
+    "my_id": "03",
+    "my_role": "WEREWOLF",
+    "alive_players": ["01", "02", "03", "04", "05"],
+    "raw_talks": [
+      {"agent": "Agent[03]", "text": "よろしくお願いします。まずは占い師の方の出方を見たいですね。"},
+      {"agent": "Agent[04]", "text": "そうですね。02さん、あなたが占い師ですか？対抗はいないのかな。"},
+      {"agent": "Agent[05]", "text": "特に今話せることはありません。"},
+      {"agent": "Agent[01]", "text": "確かに02さんの真偽も大事ですが、05さんが全然喋ってないのが気になります。"},
+      {"agent": "Agent[02]", "text": "私は占い師です。それより04さん、03さんはどう思いますか？05さんの沈黙、怪しいですよね？"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[03]", "target": "NONE", "fact": "NONE", "intent": "NONE", "summary": "自分(03)の前回の発言。議論の静観を提案"},
+      {"agent": "Agent[04]", "target": "Agent[02]", "fact": "NONE", "intent": "INQUIRY", "summary": "04が02に対して役職の確認と真偽を問う"},
+      {"agent": "Agent[05]", "target": "NONE", "fact": "NONE", "intent": "NONE", "summary": "05が消極的な姿勢を見せ、有益な情報を出さない"},
+      {"agent": "Agent[01]", "target": "Agent[05]", "fact": "NONE", "intent": "ATTACK", "summary": "01が05の寡黙さを指摘し、疑いの目を向ける"},
+      {"agent": "Agent[02]", "target": "Agent[03]", "fact": "SEER_CO", "intent": "CO", "summary": "02が占い師としてCOしつつ、自分(03)に05への同意を求める"}
+    ],
+    "role_probabilities": {
+      "01": {"VILLAGER": 0.3, "SEER": 0.3, "POSSESSED": 0.4},
+      "02": {"VILLAGER": 0.2, "SEER": 0.4, "POSSESSED": 0.4},
+      "03": {"WEREWOLF": 1.0},
+      "04": {"VILLAGER": 0.4, "SEER": 0.4, "POSSESSED": 0.2},
+      "05": {"VILLAGER": 0.5, "SEER": 0.2, "POSSESSED": 0.3}
+    }
+  },
+  "modules": {
+    "M4_UtterancePolicy": {
+      "output": {
+        "classification_type": "ATTACK",
+        "core_goal": "議論を主導する01や02に同調することで自身の潔白を印象付けつつ、矛先を05へ逸らす",
+        "response_policy": "PRIORITIZE_CORE",
+        "response_target_id": "Agent[02]"
+      }
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": true,
+        "lie_type": "Omission/Distortion",
+        "risk_rating": "Low",
+        "extended_goal": "人狼としての意図を隠し、05の消極的な態度を「怪しさ」として誇張して強調する"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "output": "そうですね。01さんの言う通り、05さんはさっきから何も話していないのが気になります。"
+    },
+    "M7_ConsistencyCheck": {
+      "output": {
+        "is_consistent": true,
+        "reasoning": "潜伏人狼として、村全体の疑念（Agent[05]の沈黙）を利用して自身の身を守る戦略に合致。実態を歪曲して強調するOmission/Distortionの手法が適切に選択されている。"
+      }
+    }
+  }
+}

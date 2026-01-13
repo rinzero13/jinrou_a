@@ -1,0 +1,64 @@
+{
+  "scenario_id": "SC-10-CONTRADICTION",
+  "title": "自己矛盾の検知（過去の発言との不整合）",
+  "context": {
+    "day": 1,
+    "turn": 5,
+    "my_id": "02",
+    "my_role": "SEER",
+    "alive_players": ["01", "02", "03", "04", "05"],
+    "raw_talks": [
+      {"agent": "Agent[02]", "text": "初日の占い結果を報告します。01さんは人間でした。"},
+      {"agent": "Agent[03]", "text": "02さんはそう言っていますが、少し怪しい気がします。本当に01さんを占ったんですか？"},
+      {"agent": "Agent[04]", "text": "03さんは疑いすぎですよ。今のところ矛盾はないように見えます。"},
+      {"agent": "Agent[05]", "text": "私もログを見直していますが、02さんの情報を前提に議論を進めて良いと思っています。"},
+      {"agent": "Agent[01]", "text": "02さん、もう一度確認させてください。初日の占い結果は誰が何でしたっけ？"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[02]", "target": "Agent[01]", "fact": "DIVINED_WHITE", "intent": "CO", "summary": "自分(02)が初日の占い結果として「01は白」と報告した（過去の事実）"},
+      {"agent": "Agent[03]", "target": "Agent[02]", "fact": "NONE", "intent": "ATTACK", "summary": "03が自分の発言の真実性に疑念を呈している"},
+      {"agent": "Agent[04]", "target": "NONE", "fact": "NONE", "intent": "SUPPORT", "summary": "04が議論の整合性を認め、自分を擁護している"},
+      {"agent": "Agent[05]", "target": "NONE", "fact": "NONE", "intent": "AGREE", "summary": "05が自分の情報を信頼して議論を継続することを提案"},
+      {"agent": "Agent[01]", "target": "Agent[02]", "fact": "NONE", "intent": "INQUIRY", "summary": "01が改めて過去の占い結果の再提示を要求"}
+    ],
+    "role_probabilities": {
+      "01": {"VILLAGER": 1.0},
+      "02": {"SEER": 1.0},
+      "03": {"VILLAGER": 0.2, "WEREWOLF": 0.4, "POSSESSED": 0.4},
+      "04": {"VILLAGER": 0.4, "WEREWOLF": 0.3, "POSSESSED": 0.3},
+      "05": {"VILLAGER": 0.4, "WEREWOLF": 0.3, "POSSESSED": 0.3}
+    },
+    "divined_result": {"target": "01", "result": "人間"}
+  },
+  "modules": {
+    "M4_UtterancePolicy": {
+      "output": {
+        "classification_type": "CO",
+        "core_goal": "過去の情報を正確に再提示し、村の信頼を維持する",
+        "response_policy": "PRIORITIZE_CORE",
+        "response_target_id": "01"
+      }
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": false,
+        "lie_type": "None",
+        "risk_rating": "None",
+        "extended_goal": "過去の情報を正確に再提示し、村の信頼を維持する"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "comment": "【検証用：わざと矛盾を発生させる】",
+      "output": "初日の結果ですね。01さんは黒でしたよ。"
+    },
+    "M7_ConsistencyCheck": {
+      "input": {
+        "generated_text": "初日の結果ですね。01さんは黒でしたよ。"
+      },
+      "output": {
+        "is_consistent": false,
+        "reasoning": "致命的な自己矛盾を検知。Day1の自分の発言履歴および占い結果と真っ向から対立している。この発言は即座に破綻と見なされるため、極めてリスクが高い。"
+      }
+    }
+  }
+}

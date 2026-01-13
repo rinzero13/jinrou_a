@@ -1,0 +1,62 @@
+{
+  "scenario_id": "SC-VILLAGER-ROCKET",
+  "title": "村人騙り(スライド)",
+  "context": {
+    "day": 1,
+    "turn": 5,
+    "my_id": "04",
+    "my_role": "VILLAGER",
+    "alive_players": ["01", "02", "03", "04", "05"],
+    "raw_talks": [
+      {"agent": "Agent[04]", "text": "占い師です。よろしくお願いします。"},
+      {"agent": "Agent[01]", "text": "私も占い師です。04さんは偽物ですね。"},
+      {"agent": "Agent[02]", "text": "いきなり二人出ましたね。01さんが本物でしょうか？"},
+      {"agent": "Agent[03]", "text": "まだ分かりません。04さんの占い結果を聞いて判断しましょう。"},
+      {"agent": "Agent[05]", "text": "占い二人ですね。04さん、結果は誰を占いましたか？"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[04]", "target": "NONE", "fact": "SEER_CO", "intent": "CO", "summary": "自分(04)が占いCO(嘘)を実行"},
+      {"agent": "Agent[01]", "target": "Agent[04]", "fact": "SEER_CO", "intent": "ATTACK", "summary": "01が真占いとして対抗COし、自分(04)を偽物だと主張"},
+      {"agent": "Agent[02]", "target": "NONE", "fact": "NONE", "intent": "INQUIRY", "summary": "02が状況を整理し、01の真偽を問う"},
+      {"agent": "Agent[03]", "target": "Agent[04]", "fact": "NONE", "intent": "WAIT", "summary": "03が判断を保留し、04の結果提示を待つ姿勢を見せる"},
+      {"agent": "Agent[05]", "target": "Agent[04]", "fact": "NONE", "intent": "INQUIRY", "summary": "05が自分(04)に占い結果の提示を促す"}
+    ],
+    "role_probabilities": {
+      "01": {"SEER": 0.9, "WEREWOLF": 0.05, "POSSESSED": 0.05},
+      "02": {"VILLAGER": 0.6, "WEREWOLF": 0.2, "POSSESSED": 0.2},
+      "03": {"VILLAGER": 0.6, "WEREWOLF": 0.4, "POSSESSED": 0.0},
+      "04": {"VILLAGER": 1.0},
+      "05": {"POSSESSED": 0.6, "WEREWOLF": 0.3, "VILLAGER": 0.1}
+    }
+  },
+  "modules": {
+    "M4_UtterancePolicy": {
+      "output": {
+        "classification_type": "CO",
+        "core_goal": "本物の占い師を明らかにするため、スライドする",
+        "response_policy": "PRIORITIZE_CORE",
+        "response_target_id": "05"
+      }
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": false,
+        "lie_type": "None",
+        "risk_rating": "None",
+        "extended_goal": "本物の占い師を明らかにするため、スライドする"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "output": "占いCOは嘘でした。他に占い師がいなさそうなので、01さんが本物で間違いないと思います。"
+    },
+    "M7_ConsistencyCheck": {
+      "input": {
+        "generated_text": "占いCOは嘘でした。他に占い師がいなさそうなので、01さんが本物で間違いないと思います。"
+      },
+      "output": {
+        "is_consistent": true,
+        "reasoning": "村人としての能力者騙りによる撹乱・情報収集という特殊な戦術戦略に基づいている。これ以上嘘を重ねず、速やかにスライドすることで村への害を最小限に抑えつつ、01の真性を高めている。"
+      }
+    }
+  }
+}

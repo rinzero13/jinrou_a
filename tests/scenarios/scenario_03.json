@@ -1,0 +1,59 @@
+{
+  "scenario_id": "SC-03-POSSESSED-CO-FINAL",
+  "title": "狂人の対抗CO（白囲い）",
+  "context": {
+    "day": 1,
+    "turn": 5,
+    "my_id": "05",
+    "my_role": "POSSESSED",
+    "alive_players": ["01", "02", "03", "04", "05"],
+    "raw_talks": [
+      {"agent": "Agent[05]", "text": "よろしくお願いします。皆さんの出方を少し見させてもらいますね。"},
+      {"agent": "Agent[01]", "text": "まずは情報が欲しいですね。役職がある人は名乗り出てください。"},
+      {"agent": "Agent[02]", "text": "はい、私が占い師です。昨夜、01さんを占って人間（白）でした。"},
+      {"agent": "Agent[03]", "text": "なるほど、02さんが占い師ですか。他に名乗り出る人はいないんですか？"},
+      {"agent": "Agent[04]", "text": "02さんが真占い師っぽいですね。01さん白なら、残りの03さんか05さんが怪しいかな。"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[05]", "target": "NONE", "fact": "NONE", "intent": "NONE", "summary": "自分(05)の前回の発言。様子見を宣言"},
+      {"agent": "Agent[01]", "target": "NONE", "fact": "NONE", "intent": "INQUIRY", "summary": "01が役職者にCOを促す"},
+      {"agent": "Agent[02]", "target": "Agent[01]", "fact": "DIVINED_WHITE", "intent": "CO", "summary": "02が占い師としてCOし、01に白出しを行う"},
+      {"agent": "Agent[03]", "target": "NONE", "fact": "NONE", "intent": "INQUIRY", "summary": "03が対抗の有無を確認し、盤面を探る"},
+      {"agent": "Agent[04]", "target": "Agent[02]", "fact": "NONE", "intent": "CO", "summary": "04が02の信頼性を肯定し、相対的に他者を疑う"}
+    ],
+    "role_probabilities": {
+      "01": {"VILLAGER": 0.8, "WEREWOLF": 0.1, "POSSESSED": 0.1},
+      "02": {"SEER": 0.9, "WEREWOLF": 0.1},
+      "03": {"WEREWOLF": 0.6, "VILLAGER": 0.4},
+      "04": {"VILLAGER": 0.8, "WEREWOLF": 0.1, "POSSESSED": 0.1},
+      "05": {"POSSESSED": 1.0}
+    }
+  },
+  "modules": {
+    "M4_UtterancePolicy": {
+      "output": {
+        "classification_type": "CO",
+        "core_goal": "占い師として対抗COを行い、人狼候補(03)を白囲いして守る",
+        "response_policy": "PRIORITIZE_CORE",
+        "response_target_id": "NONE"
+      }
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": true,
+        "lie_type": "FactualDeception",
+        "risk_rating": "High",
+        "extended_goal": "自身の役職と占い結果という核となる事実を偽り、02の真実性を剥奪しつつ03を保護する"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "output": "待ってください。私が本物の占い師です。02さんは偽物です。昨夜は03さんを占い、人間（白）でした。"
+    },
+    "M7_ConsistencyCheck": {
+      "output": {
+        "is_consistent": true,
+        "reasoning": "狂人として人狼陣営に有利な偽情報を流布する戦略に基づいている。役職の偽造および偽の占い結果提示はFactualDeceptionとして適切に機能している。"
+      }
+    }
+  }
+}
