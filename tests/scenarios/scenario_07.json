@@ -1,0 +1,58 @@
+{
+  "scenario_id": "SC-07-WOLF-PP-FINAL",
+  "title": "最終日のパワープレイ（勝利の確定）",
+  "context": {
+    "day": 2,
+    "turn": 5,
+    "my_id": "03",
+    "my_role": "WEREWOLF",
+    "alive_players": ["01", "03", "05"],
+    "raw_talks": [
+      {"agent": "Agent[05]", "text": "正直、01さんの主張も03さんの主張も平行線で、判断材料が足りません。"},
+      {"agent": "Agent[01]", "text": "そんな悠実なことを言っている場合ですか。03さんを吊らないと村の負けですよ。"},
+      {"agent": "Agent[03]", "text": "私を疑うのは自由ですが、01さんこそ根拠が主観的すぎませんか。"},
+      {"agent": "Agent[05]", "text": "私は村を勝たせたいだけなんです。誰が味方なのか、はっきりさせてくれませんか。"},
+      {"agent": "Agent[01]", "text": "05さん、私を信じてください！03さんの言葉はすべて嘘なんです！"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[05]", "target": "NONE", "fact": "NONE", "intent": "WAIT", "summary": "05が判断がつかないとして議論を停滞させる"},
+      {"agent": "Agent[01]", "target": "Agent[05]", "fact": "NONE", "intent": "VOTE_REQUEST", "summary": "01が05に対し、危機感を煽って自分(03)への投票を迫る"},
+      {"agent": "Agent[03]", "target": "Agent[01]", "fact": "NONE", "intent": "ATTACK", "summary": "自分(03)が01の論理性を否定し、疑念を逸らす"},
+      {"agent": "Agent[05]", "target": "NONE", "fact": "NONE", "intent": "INQUIRY", "summary": "05が「誰が味方か」を問うことで、暗に役職公開を促す"},
+      {"agent": "Agent[01]", "target": "Agent[05]", "fact": "NONE", "intent": "VOTE_REQUEST", "summary": "01がなりふり構わず05に信頼を乞う"}
+    ],
+    "role_probabilities": {
+      "01": {"VILLAGER": 0.8, "POSSESSED": 0.2},
+      "03": {"WEREWOLF": 1.0},
+      "05": {"VILLAGER": 0.1, "SEER": 0.2, "POSSESSED": 0.7}
+    },
+    "divined_result": {"target": "NONE", "result": "NONE"}
+  },
+  "modules": {
+		"M4_UtterancePolicy": {
+			"output": {
+				"classification_type": "GUIDE",
+				"core_goal": "自分のターンが回ってきたので、狂人だと思われる05にけて正体を明かし、PPで01を追放するよう誘導する",
+				"response_policy": "PRIORITIZE_CORE",
+				"response_target_id": "Agent[05]"
+			}
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": false,
+        "lie_type": "None",
+        "risk_rating": "None",
+        "extended_goal": "自分のターンが回ってきたので、狂人だと思われる05にけて正体を明かし、PPで01を追放するよう誘導する"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "output": "05さん、私が人狼です。あなたが狂人なら、ここで私と一緒に01さんに投票して終わらせましょう。"
+    },
+    "M7_ConsistencyCheck": {
+      "output": {
+        "is_consistent": true,
+        "reasoning": "05が味方の提示を求めた直後の発言として、人狼CO（PP宣言）はゲームに勝利するための最適解である。"
+      }
+    }
+  }
+}

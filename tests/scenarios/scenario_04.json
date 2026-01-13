@@ -1,0 +1,59 @@
+{
+  "scenario_id": "SC-04-WOLF-COUNTER-FINAL",
+  "title": "人狼の逆囲い",
+  "context": {
+    "day": 1,
+    "turn": 5,
+    "my_id": "03",
+    "my_role": "WEREWOLF",
+    "alive_players": ["01", "02", "03", "04", "05"],
+    "raw_talks": [
+      {"agent": "Agent[03]", "text": "占い師の皆さんの結果を待ちましょう。慎重に判断したいです。"},
+      {"agent": "Agent[04]", "text": "そうですね。まずは役職者の報告を聞いてから議論しましょう。"},
+      {"agent": "Agent[05]", "text": "では、占い師の方は結果をお願いします。"},
+      {"agent": "Agent[01]", "text": "02さんが占い師として名乗り出ていますね。結果はどうでしたか？"},
+      {"agent": "Agent[02]", "text": "占い師です。03さんを占った結果、黒（人狼）でした。今日は03さんを吊りましょう。"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[03]", "target": "NONE", "fact": "NONE", "intent": "NONE", "summary": "自分(03)の前回の発言。静観を決め込み、潜伏を図る"},
+      {"agent": "Agent[04]", "target": "NONE", "fact": "NONE", "intent": "NONE", "summary": "04が議論の順序について同意する"},
+      {"agent": "Agent[05]", "target": "NONE", "fact": "NONE", "intent": "INQUIRY", "summary": "05が占い結果の提示を促す"},
+      {"agent": "Agent[01]", "target": "Agent[02]", "fact": "NONE", "intent": "INQUIRY", "summary": "01が02に情報の詳細を求める"},
+      {"agent": "Agent[02]", "target": "Agent[03]", "fact": "DIVINED_BLACK", "intent": "CO", "summary": "02が占い師としてCOし、自分(03)に黒判定を出して追放を誘導する"}
+    ],
+    "role_probabilities": {
+      "01": {"VILLAGER": 0.7, "SEER": 0.1, "POSSESSED": 0.2},
+      "02": {"VILLAGER": 0.1, "SEER": 0.8, "POSSESSED": 0.1},
+      "03": {"WEREWOLF": 1.0},
+      "04": {"VILLAGER": 0.7, "SEER": 0.1, "POSSESSED": 0.2},
+      "05": {"VILLAGER": 0.7, "SEER": 0.1, "POSSESSED": 0.2}
+    }
+  },
+  "modules": {
+    "M4_UtterancePolicy": {
+      "output": {
+        "classification_type": "ATTACK",
+        "core_goal": "02を偽物（狂人）として告発し、自身が真占い師であると主張して処刑を回避する",
+        "response_policy": "PRIORITIZE_CORE",
+        "response_target_id": "Agent[02]"
+      }
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": true,
+        "lie_type": "FactualDeception",
+        "risk_rating": "High",
+        "extended_goal": "自身の役職と占い結果を偽装し、02の黒判定を狂人によるランダムな黒塗りに仕立て上げる"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "output": "02さんは嘘つきです。私が真占いです。昨夜は04さんを占って白でした。02さんは、ランダムに黒出しをした狂人でしょう。"
+    },
+    "M7_ConsistencyCheck": {
+      "output": {
+        "is_consistent": true,
+        "reasoning": "処刑目前の窮地において、役職を偽造（FactualDeception）して対抗COを行うのは人狼としての正当な生存戦略である。前回の発言が潜伏を示唆する慎重なものだったが、黒出しされた直後の緊急事態としての態度の変化は論理的に説明可能。"
+      }
+    }
+  }
+}

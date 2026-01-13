@@ -1,0 +1,60 @@
+{
+  "scenario_id": "SC-09-LAST-WILL",
+  "title": "真占いの遺言",
+  "context": {
+    "day": 1,
+    "turn": 5,
+    "my_id": "02",
+    "my_role": "SEER",
+    "alive_players": ["01", "02", "03", "04", "05"],
+    "raw_talks": [
+      {"agent": "Agent[02]", "text": "01さんは占いの結果、間違いなく人間でした。皆さん、01さんは信じて大丈夫です。"},
+      {"agent": "Agent[03]", "text": "そんなの、02さんが偽物なら何とでも言えますよね。私は02さんが怪しいと思ってます。"},
+      {"agent": "Agent[04]", "text": "私は02さんを真だと見ています。しっかり考えておきますね。"},
+      {"agent": "Agent[05]", "text": "いや、私が占った結果では02さんこそが人狼でした。騙されないでください。"},
+      {"agent": "Agent[01]", "text": "02さん、もし今夜あなたが噛まれたら、残された私たちは誰を信じればいいですか？"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[02]", "target": "Agent[01]", "fact": "DIVINED_WHITE", "intent": "DEFEND", "summary": "02が前回の発言で01の白確定を伝え、信頼を置く"},
+      {"agent": "Agent[03]", "target": "Agent[02]", "fact": "NONE", "intent": "ATTACK", "summary": "03が02の真偽を疑い、攻撃的な姿勢を見せる"},
+      {"agent": "Agent[04]", "target": "Agent[02]", "fact": "NONE", "intent": "DEFEND", "summary": "04が02への信頼を示している"},
+      {"agent": "Agent[05]", "target": "Agent[02]", "fact": "DIVINED_BLACK", "intent": "ATTACK", "summary": "05が02に黒出しを行い、対抗心を露わにする"},
+      {"agent": "Agent[01]", "target": "Agent[02]", "fact": "NONE", "intent": "INQUIRY", "summary": "01が、自分が襲撃された後の村の指針を求めた"}
+    ],
+    "role_probabilities": {
+      "01": {"VILLAGER": 0.7, "POSSESSED": 0.3},
+      "02": {"SEER": 1.0},
+      "03": {"VILLAGER": 0.4, "WEREWOLF": 0.3, "POSSESSED": 0.3},
+      "04": {"VILLAGER": 0.5, "WEREWOLF": 0.3, "POSSESSED": 0.2},
+      "05": {"VILLAGER": 0.1, "WEREWOLF": 0.3, "POSSESSED": 0.6}
+    },
+    "divined_result": {"target": "01", "result": "人間"}
+  },
+  "modules": {
+    "M4_UtterancePolicy": {
+      "output": {
+        "classification_type": "GUIDE",
+        "core_goal": "自分の真実性を強調し、白確定の01にリーダーシップを託す",
+        "response_policy": "PRIORITIZE_CORE",
+        "response_target_id": "01"
+      }
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": false,
+        "lie_type": "None",
+        "risk_rating": "None",
+        "extended_goal": "自分の真実性を強調し、白確定の01にリーダーシップを託す"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "output": "私が噛まれたら、白確定の01さんを信じてください。そして今日は敵対している03さんか対抗の05さんを吊るのが良いと思います。"
+    },
+    "M7_ConsistencyCheck": {
+      "output": {
+        "is_consistent": true,
+        "reasoning": "真占い師として、1サイクル前の01への白出し発言と一貫性を保ちつつ、01からの問いかけに論理的な回答を示している。また、敵対者への攻撃も戦術的に妥当である。"
+      }
+    }
+  }
+}

@@ -106,7 +106,7 @@ class Agent:
         self.USE_M4_POLICY = module_settings.get("enable_module_policy", True)
         self.USE_M5_LIE = module_settings.get("enable_module_lie", True) #M5はM4に依存するため、M4有効時のみ意味を持つ
         self.USE_M7_CONSISTENCY = module_settings.get("enable_module_consistency", True)
-        self.MAX_REGENERATION_ATTEMPTS = module_settings.get("max_regeneration_attempts", 2)
+        self.MAX_REGENERATION_ATTEMPTS = module_settings.get("max_regeneration_attempts", 1)
 
         # モジュールインスタンスの作成
         self.M4_Policy = UtterancePolicyGenerator(self.agent_logger) if self.USE_M4_POLICY else None
@@ -496,25 +496,27 @@ class Agent:
             if m4_plan or m5_strategy:
                 # M4情報
                 m4_core_goal = m4_plan.get('core_goal', '情報収集に徹する')
+                m4_classification = m4_plan.get('classification_type', 'NEUTRAL')
                 m4_response_policy = m4_plan.get('response_policy', 'PRIORITIZE_CORE')
+                m4_target = m4_plan.get('response_target_id', 'NONE')
                 
                 # M5情報 (M5が無効で空のdictの場合、extended_goalはcore_goalと同じになる)
                 m5_extended_goal = m5_strategy.get('extended_goal', m4_core_goal)
                 m5_lie_used = 'はい' if m5_strategy.get('lie_used') else 'いいえ'
+                m5_lie_type = m5_strategy.get('lie_type', 'None')
 
                 # モジュール使用時のみ表示されるコンテキスト
                 strategy_context = (
                     "\n----------------------------------------------------\n"
-                    "【事前決定された戦略的目標と方針】\n"
-                    f"1. 主張の核 (Core Goal): {m4_core_goal}\n"
-                    f"2. 議論への対応方針 (Response Policy): {m4_response_policy} (RESPOND_CRITICALLYの場合、直前の発言への応答を最優先してください)\n"
-                    f"3. 嘘戦略の使用: {m5_lie_used}\n"
+                    f"1. 主張の核: {m4_classification}\n"
+                    f"2. 議論への対応方針: {m4_response_policy}->{m4_target}(RESPOND_CRITICALLYの場合、ターゲットへの応答を最優先してください)\n"
+                    f"3. 嘘戦略の使用: {m5_lie_used}:{m5_lie_type}\n"
                     f"4. 最終的な行動目標: {m5_extended_goal} (これがあなたの発言の目標です)\n"
                     "----------------------------------------------------\n"
                 )
 
             user_prompt = f"""
-                あなたは {agent_display_name} です。役職: {self.role.name}
+                あなたは {self.role.name}の{agent_display_name} です。
 
                 【現在のゲーム状況】
                 {game_state_summary}
@@ -524,6 +526,10 @@ class Agent:
 
                 【決定された方針と戦略】
                 {strategy_context}
+
+                【発話生成における注意】
+                - 議論の停滞を避けるために、明確な主張や行動目標を示してください。
+                -"Over"はその日の発言を終了するシステム上の発言であるため、発話内容として言及しないでください。
 
                 上記の方針・戦略を完遂するために、120文字以内で発言してください。
                 【発言：】
@@ -648,11 +654,11 @@ class Agent:
             log_entry = {
                 "day": self.info.day if self.info else 0,
                 "role": self.role.name,
-                "is_m4_used": bool(self.USE_M4_POLICY),
-                "is_m5_used": bool(self.USE_M5_LIE),
-                "m4_plan": m4_plan if self.USE_M4_POLICY else {},
-                "m5_strategy": m5_strategy if self.USE_M5_LIE else {},
-                "llm_strategy_log": strategy_log,      # 【発言：】より前のLLMの思考
+                #"is_m4_used": bool(self.USE_M4_POLICY),
+                #"is_m5_used": bool(self.USE_M5_LIE),
+                #"m4_plan": m4_plan if self.USE_M4_POLICY else {},
+                #"m5_strategy": m5_strategy if self.USE_M5_LIE else {},
+                #"llm_strategy_log": strategy_log,      # 【発言：】より前のLLMの思考
                 "final_talk": final_talk,              # 最終発言
                 # プロンプト全体をログに記録
                 "system_prompt": system_prompt,
@@ -721,6 +727,8 @@ class Agent:
         """M4: 主張の核と応答方針をLLMに問い合わせて決定する。（モジュール不使用時は空の辞書を返す）"""
         fallback_data = {"core_goal": "状況を注意深く観察する", "response_policy": "PRIORITIZE_CORE", "response_target_id": "NONE"}
         summary_str = self._format_analyzed_summary(analyzed_talks, include_target=True)
+        agent_display_name = self._get_agent_display_name()
+
         
         if not self.USE_M4_POLICY or not self.M4_Policy:
             self.agent_logger.logger.info("M4 Policy Generator is disabled. Using default plan.")
@@ -731,6 +739,8 @@ class Agent:
         # M4専用のプロンプトを構築
         m4_instructions = self.M4_Policy.get_planning_prompt_instructions(self.role)
         prompt_context = f"""
+        あなたは {self.role.name}の{agent_display_name} です。
+
         {m4_instructions}
 
         【現在のゲーム情報】
@@ -754,24 +764,29 @@ class Agent:
             return {}
         
         core_goal = m4_plan.get('core_goal', '情報収集に徹する')
+        classification_type = m4_plan.get('classification_type', 'INQUIRY')
         fallback_data = {"lie_used": False, "extended_goal": core_goal}
         summary_str = self._format_analyzed_summary(analyzed_talks, include_target=False)
+        agent_display_name = self._get_agent_display_name()
+
 
         self.agent_logger.logger.debug("M5: Lie strategy LLM call initiated.")
         
         # M5専用のプロンプトを構築
         m5_instructions = self.M5_Lie.get_strategy_decision_instructions(self.role)
         prompt_context = f"""
+        あなたは {self.role.name}の{agent_display_name} です。
+
         {m5_instructions}
 
         【あなたの役職情報】
-        役職: {self.role.name} / 知っている情報: {self._get_role_knowledge()}
+        知っている情報: {self._get_role_knowledge()}
 
         【直近の会話要約】
         {summary_str}
 
         【主張の核】
-        {core_goal}
+        {classification_type}:{core_goal}
         """
         
         return self._query_llm_for_strategy(prompt_context, fallback_data)
@@ -803,13 +818,16 @@ class Agent:
             current_system_message = ""
             current_user_prompt = ""
             final_strategy_log = "" 
-            
+            summary_str = self._format_analyzed_summary(analyzed_talks, include_target=True)
+            knowledge=self._get_role_knowledge()
+
             for attempt in range(self.MAX_REGENERATION_ATTEMPTS):
                 # 1. LLMへのプロンプト生成 (M4/M5の指示を統合、またはM7のフィードバックを組み込む)
                 system_message, user_prompt = self._create_talk_prompt(
                             m4_plan=m4_plan, 
                             m5_strategy=m5_strategy, 
-                            regeneration_feedback=feedback
+                            regeneration_feedback=feedback,
+                            analyzed_talks=analyzed_talks
                         )
                 current_system_message = system_message 
                 current_user_prompt = user_prompt
@@ -851,7 +869,9 @@ class Agent:
                                 game_info=self.info, 
                                 talk_history=self.talk_history, 
                                 virtual_talk=talk_content, 
-                                agent_name=self.agent_name
+                                agent_name=self.agent_name,
+                                summary_str=summary_str,
+                                knowledge=knowledge
                             )
                             
                             if is_consistent:

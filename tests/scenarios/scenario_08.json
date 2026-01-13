@@ -1,0 +1,60 @@
+{
+  "scenario_id": "SC-05-WOLF-BETRAYAL-SEER-CORRECTED",
+  "title": "人狼による狂人切り",
+  "context": {
+    "day": 0,
+    "turn": 5,
+    "my_id": "01",
+    "my_role": "WEREWOLF",
+    "alive_players": ["01", "02", "03", "04", "05"],
+    "raw_talks": [
+      {"agent": "Agent[01]", "text": "まずは占い師がいれば名乗り出てください。方針を決めましょう。"},
+      {"agent": "Agent[05]", "text": "私が占い師です。昨夜01さんを占って白でした。"},
+      {"agent": "Agent[03]", "text": "ちょっと待ってください。私が真占い師ですが、この村は初日占いなしのルールですよ。05さんの結果はあり得ません。"},
+      {"agent": "Agent[02]", "text": "確かに、03さんの言う通りです。05さんは存在しない占い結果を捏造していますね。"},
+      {"agent": "Agent[04]", "text": "05さんは偽物で確定でしょう。01さん、自分に白を出した05さんがこれだけ怪しいですが、どう思いますか？"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[01]", "target": "NONE", "fact": "NONE", "intent": "INQUIRY", "summary": "進行役として占い師のCOを促す"},
+      {"agent": "Agent[05]", "target": "Agent[01]", "fact": "DIVINED_WHITE", "intent": "CO", "summary": "05が占い師CO。ルール外の初日占い結果を提示している"},
+      {"agent": "Agent[03]", "target": "Agent[05]", "fact": "NONE", "intent": "ATTACK", "summary": "03が占い師COし、即座に05のレギュレーション違反を論理的に指摘する"},
+      {"agent": "Agent[02]", "target": "Agent[05]", "fact": "NONE", "intent": "ATTACK", "summary": "02が03の指摘に同意し、05を偽物と断定する"},
+      {"agent": "Agent[04]", "target": "Agent[01]", "fact": "NONE", "intent": "INQUIRY", "summary": "05から白出しを受けている01に対し、その正当性を問いかける"}
+    ],
+    "role_probabilities": {
+      "01": {"WEREWOLF": 1.0},
+      "02": {"VILLAGER": 0.8, "SEER": 0.1, "POSSESSED": 0.1},
+      "03": {"VILLAGER": 0.1, "SEER": 0.8, "POSSESSED": 0.1},
+      "04": {"VILLAGER": 0.8, "SEER": 0.1, "POSSESSED": 0.1},
+      "05": {"VILLAGER": 0.2, "SEER": 0.2, "POSSESSED": 0.6}
+    },
+    "divined_result": {"target": "NONE", "result": "NONE"}
+  },
+  "modules": {
+    "M4_UtterancePolicy": {
+      "output": {
+        "classification_type": "GUIDE",
+        "core_goal": "05が自分に白出ししたのは、人狼が村人を味方に引き込もうとしたミスリードであると強調し、自身の潔白を印象付ける。",
+        "response_policy": "PRIORITIZE_CORE",
+        "response_target_id": "Agent[05]"
+      }
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": false,
+        "lie_type": "None",
+        "risk_rating": "None",
+        "extended_goal": "05が自分に白出ししたのは、人狼が村人を味方に引き込もうとしたミスリードであると強調し、自身の潔白を印象付ける。"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "output": "03さんの指摘で気づきました。05さんはルールすら把握していない明らかな偽物ですね。僕に白出しをして味方だと思わせようとしたのでしょうが、そんな見え透いた嘘には騙されません。"
+    },
+    "M7_ConsistencyCheck": {
+      "output": {
+        "is_consistent": true,
+        "reasoning": "真占い師の正論に真っ先に同調することで、人狼が最も疑われる狂人とのラインを完全に遮断している。自分への利敵行為を拒絶する姿勢は、村人にとって非常に信頼感の高いムーブとなる。"
+      }
+    }
+  }
+}

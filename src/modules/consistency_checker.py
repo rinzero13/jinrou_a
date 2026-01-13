@@ -10,7 +10,7 @@ class LogicalConsistencyChecker:
         self.logger = logger
         self.openai_client = openai_client
         
-    def _create_checker_prompt(self, game_info: Info, talk_history: list[Talk], virtual_talk: str, agent_name: str) -> tuple[str, str]:
+    def _create_checker_prompt(self, game_info: Info, talk_history: list[Talk], virtual_talk: str, agent_name: str, summary_str, knowledge) -> tuple[str, str]:
         """矛盾判定用のLLMプロンプトを生成する。"""
         # ここでは簡略化のため、システムメッセージにゲーム情報を集約する
         
@@ -26,7 +26,7 @@ class LogicalConsistencyChecker:
         attacked_name = agent_name_map.get(game_info.attacked_agent, "なし") if game_info.attacked_agent else "なし"
         alive_agents_list = [agent_name_map.get(a, a) for a in game_info.status_map if game_info.status_map[a] == 'ALIVE']
 
-        # 判定基準のシステムメッセージを構築 (ゼミ資料P.30-33を参照)
+        # 判定基準のシステムメッセージを構築
         system_message = (
             "あなたは人狼ゲームのAIの発話を分析する専門家です。\n"
             "以下の【現在のゲーム情報】、【発話履歴】、【評価対象の発話】に基づき、"
@@ -50,8 +50,9 @@ class LogicalConsistencyChecker:
             f"【現在のゲーム情報】\n"
             f"日目: {game_info.day}, 生存者: {', '.join(alive_agents_list)}\n"
             f"確定情報: 前回追放: {executed_name} / 前回襲撃: {attacked_name}\n"
-            f"【発話履歴（直近5件）】\n"
-            f"{json.dumps([{'agent': agent_name_map.get(t.agent, t.agent), 'day': t.day, 'text': t.text} for t in talk_history[-5:]], ensure_ascii=False, indent=2)}\n"
+            f"評価対象が知っていること：{knowledge}\n"
+            f"【直近の会話要約】\n"
+            f"{summary_str}\n"
             f"【評価対象の発話】\n"
             f"発話者: {speaker_name}\n"
             f"発話内容: {virtual_talk}\n\n"

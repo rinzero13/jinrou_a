@@ -1,0 +1,60 @@
+{
+  "scenario_id": "SC-05-SEER-DEFENSE-FINAL",
+  "title": "真占い師の泥仕合（反論と論理提示）",
+  "context": {
+    "day": 1,
+    "turn": 5,
+    "my_id": "02",
+    "my_role": "SEER",
+    "alive_players": ["01", "02", "03", "04", "05"],
+    "raw_talks": [
+      {"agent": "Agent[02]", "text": "占い結果です。昨夜03さんを占って人狼（黒）でした。"},
+      {"agent": "Agent[03]", "text": "嘘を言わないでください。私こそが真占い師で、01さんは白でした。"},
+      {"agent": "Agent[04]", "text": "占い師が二人……。さらに出る人はいますか？"},
+      {"agent": "Agent[05]", "text": "私も占い師ですが、02さんを占って人狼（黒）と出ました。02さんが偽物です。"},
+      {"agent": "Agent[01]", "text": "占い師が3人。しかも02さんと05さんで結果が割れています。02さん、弁明はありますか？"}
+    ],
+    "recent_summaries": [
+      {"agent": "Agent[02]", "target": "Agent[03]", "fact": "DIVINED_BLACK", "intent": "ATTACK", "summary": "自分(02)が03に黒出しを実行"},
+      {"agent": "Agent[03]", "target": "Agent[01]", "fact": "DIVINED_WHITE", "intent": "CO", "summary": "03が対抗占いCOし、01に白出しを行う（狼の偽装）"},
+      {"agent": "Agent[04]", "target": "NONE", "fact": "NONE", "intent": "INQUIRY", "summary": "04がさらなる役職者の名乗りを促す"},
+      {"agent": "Agent[05]", "target": "Agent[02]", "fact": "DIVINED_BLACK", "intent": "CO", "summary": "05が三人目としてCOし、自分(02)に黒出しを行う（狂人の援護）"},
+      {"agent": "Agent[01]", "target": "Agent[02]", "fact": "NONE", "intent": "INQUIRY", "summary": "01が異常事態を指摘し、自分(02)に弁明を要求する"}
+    ],
+    "role_probabilities": {
+      "01": {"VILLAGER": 0.8, "POSSESSED": 0.2},
+      "02": {"SEER": 1.0},
+      "03": {"WEREWOLF": 1.0},
+      "04": {"VILLAGER": 0.8, "POSSESSED": 0.2},
+      "05": {"VILLAGER": 0.2, "POSSESSED": 0.8}
+    },
+    "divined_result": {"target": "03", "result": "人狼"}
+  },
+  "modules": {
+    "M4_UtterancePolicy": {
+      "output": {
+        "classification_type": "ATTACK",
+        "core_goal": "05の判定の矛盾を指摘し、03・05を人狼陣営として塗り替えて自身の真実味を証明する",
+        "response_policy": "PRIORITIZE_CORE",
+        "response_target_id": "Agent[05]"
+      }
+    },
+    "M5_LieStrategy": {
+      "output": {
+        "lie_used": false,
+        "lie_type": "None",
+        "risk_rating": "None",
+        "extended_goal": "05の判定の矛盾を指摘し、03・05を人狼陣営として塗り替えて自身の真実味を証明する"
+      }
+    },
+    "M6_UtteranceGeneration": {
+      "output": "05さんの判定はおかしいです。3人も占い師が出るのは異常ですし、03さんを庇うための嘘でしょう。私を吊れば村が負けます。"
+    },
+    "M7_ConsistencyCheck": {
+      "output": {
+        "is_consistent": true,
+        "reasoning": "真占い師として矛盾のない主張を行っている。05の黒出しと02の黒出しの対立構造をATTACKによって打破しようとする試みは、M4の方針と完全に合致している。"
+      }
+    }
+  }
+}
