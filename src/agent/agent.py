@@ -256,12 +256,6 @@ class Agent:
                     self.medium_results_history.append(result_dict)
         # -----------------------------------------------------------
 
-        # --- 信念モデルの更新 ---
-        if self.info and self.BeliefModel: 
-            # 最新のゲーム情報、全発話履歴、自身の役職を渡して確率を更新
-            self.BeliefModel.update(self.info, self.talk_history, self.role)
-        # ----------------------------
-
         self.agent_logger.logger.debug(packet)
 
     def get_alive_agents(self) -> list[str]:
@@ -525,7 +519,7 @@ class Agent:
                 【現在のゲーム状況】
                 {game_state_summary}
 
-                【対話の要約 (Speech Analysis)】
+                【対話の要約】
                 {summary_str}
 
                 【決定された方針と戦略】
